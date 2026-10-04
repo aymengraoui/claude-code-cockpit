@@ -69,6 +69,7 @@ process it ever starts is `git`:
 | Shown | Where it comes from |
 | --- | --- |
 | project, turn count | `$.session.cwd()` and `$.session.turns()` |
+| everything above, at launch | `$.session.usage()`, `$.session.model()` and `$.session.turns()`, asked for in `session.start` |
 | model, effort | `turn.step`, as each request goes out |
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
 | permission mode | `classic.UserPromptSubmit` and `classic.PostToolUse`, the only inputs that carry it |
@@ -113,6 +114,11 @@ engine at all.
 
 Sections that have nothing to show say so — `not a git repository`, `nothing yet` — rather
 than vanishing, so a quiet pane reads as quiet instead of broken.
+
+The pane is primed in `session.start`, so it is populated the moment it opens rather than
+filling in as events arrive: the engine already holds the usage figures, the model and the
+turn count, so they are asked for instead of waited on. `session.start` runs again on every
+reload, so an edit to the mod repopulates it too.
 
 State lives in `$.state` rather than module variables, so a hot reload keeps the pane's
 contents, and a write redraws exactly the readers.

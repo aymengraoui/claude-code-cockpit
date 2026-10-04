@@ -18,6 +18,7 @@ import {
 } from './lib/format'
 import { parseNumstat, parseStatus, withCounts } from './lib/git'
 import { subjectOf, todosOf } from './lib/tools'
+import { fromUsage } from './lib/usage'
 
 const PANE = 'cockpit'
 
@@ -101,10 +102,15 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'cockpit', description: 'Open the cockpit pane' })
 
-    const [now, cwd, id, repo, history] = await Promise.all([
+    // At launch no event has fired yet, so every figure the engine already holds is
+    // asked for here rather than waited on. This runs again on each reload.
+    const [now, cwd, id, usage, model, turns, repo, history] = await Promise.all([
       $.clock.now(),
       $.session.cwd().catch(() => ''),
       $.session.id().catch(() => ''),
+      $.session.usage().catch(() => null),
+      $.session.model().catch(() => null),
+      $.session.turns().catch(() => null),
       readRepo($),
       readHistory($),
     ])
@@ -112,9 +118,12 @@ export const register: Register = on => {
     const segments = toPosix(cwd).split('/').filter(one => one !== '')
     await update($, state, prev => ({
       ...prev,
-      startedAt: now,
+      ...(usage === null ? {} : fromUsage(prev, usage)),
+      startedAt: usage?.startedAt ?? now,
       project: segments.at(-1) ?? null,
       sessionId: id === '' ? null : id,
+      model: model === null ? prev.model : modelLabel(model),
+      turns: turns ?? prev.turns,
       repo,
       isRepoChecked: true,
       history,
@@ -195,23 +204,7 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
-    const window = (kind: string) => {
-      const found = e.rateLimits.find(one => one.kind === kind)
-
-      return found === undefined
-        ? null
-        : { percent: found.percentUsed, resetsAt: found.resetsAt ?? null }
-    }
-
-    await update($, state, prev => ({
-      ...prev,
-      context: e.context.percent ?? prev.context,
-      tokens: e.context.tokens ?? prev.tokens,
-      window: e.context.window ?? prev.window,
-      fiveHour: window('five_hour') ?? prev.fiveHour,
-      sevenDay: window('seven_day') ?? prev.sevenDay,
-      costUsd: e.cost?.usd ?? prev.costUsd,
-    }))
+    await update($, state, prev => ({ ...prev, ...fromUsage(prev, e) }))
 
     return next(e)
   })

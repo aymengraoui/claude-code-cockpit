@@ -1,5 +1,7 @@
 node_modules/
 # Written by the engine once the mod has loaded, for the editor only.
 .claude-plugin/types/
+# Generated beside them; it extends the ignored tsconfig above.
+/tsconfig.json
 .DS_Store
 Thumbs.db

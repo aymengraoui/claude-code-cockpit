@@ -28,6 +28,13 @@ const STATUS = [
 
 const NUMSTAT = ['48\t12\tsrc/parse.ts', '90\t0\tsrc/tokens.ts', '-\t-\tlogo.png', ''].join('\n')
 
+const USAGE = {
+  startedAt: Date.now() - 600000,
+  context: { window: 200000, tokens: 24000, percent: 12 },
+  rateLimits: [{ kind: 'five_hour', percentUsed: 6 }],
+  cost: { usd: 0.12 },
+}
+
 const PANE_PROPS = {
   title: 'cockpit',
   isFocused: false,
@@ -164,6 +171,8 @@ test('the pane draws the branch and the working tree it read from git', async ($
   on('session.cwd', () => ({ value: '/repo' }))
   on('session.id', () => ({ value: 'current' }))
   on('session.turns', () => ({ value: 3 }))
+  on('session.model', () => ({ value: 'claude-opus-5' }))
+  on('session.usage', () => ({ value: USAGE }))
   on('process.run', (_$, e) => ({
     value: {
       exitCode: 0,
@@ -222,6 +231,9 @@ test('the pane names the permission mode and lists earlier sessions', async ($, 
   on('command.register', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { id: 'cockpit' } }))
   on('store.get', () => ({ value: [past] }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.model', () => ({ value: 'claude-opus-5' }))
+  on('session.usage', () => ({ value: USAGE }))
   on('process.run', () => ({
     value: {
       exitCode: 1,
@@ -276,13 +288,16 @@ test('the subject column says what a call is about, per tool', () => {
   expect(subjectOf('Unknown', {})).toBe('')
 })
 
-test('outside a repository the pane says so instead of hiding the section', async ($, on) => {
+test('the pane is primed at launch, and says so where a section is empty', async ($, on) => {
   on('clock.now', () => ({ value: Date.now() }))
   on('command.register', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { id: 'cockpit' } }))
   on('store.get', () => ({ value: [] }))
   on('session.cwd', () => ({ value: '/home/me/notes' }))
   on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 0 }))
+  on('session.model', () => ({ value: 'claude-opus-5' }))
+  on('session.usage', () => ({ value: USAGE }))
   on('process.run', () => ({
     value: {
       exitCode: 128,
@@ -305,6 +320,11 @@ test('outside a repository the pane says so instead of hiding the section', asyn
   })
 
   expect(await ui.find({ text: 'notes' })).toBeDefined()
+  // Primed at launch: no session.measure and no turn.step has fired in this test.
+  expect(await ui.find({ text: 'Opus 5' })).toBeDefined()
+  expect(await ui.find({ text: '12%' })).toBeDefined()
+  expect(await ui.find({ text: '24k/200k' })).toBeDefined()
+  expect(await ui.find({ text: '$0.12' })).toBeDefined()
   expect(await ui.find({ text: 'not a git repository' })).toBeDefined()
   expect(await ui.find({ text: 'nothing yet' })).toBeDefined()
   expect(await ui.find({ text: 'this is the first one recorded' })).toBeDefined()
