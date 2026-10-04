@@ -708,3 +708,45 @@ test('a managed model row offers no picker and says why', async ($, on) => {
   expect(await ui.find({ key: 'model-Sonnet 5.5' })).toBeUndefined()
   expect(toasts.join(' ')).toContain('managed')
 })
+
+test('a long model name is drawn whole, not cut to the column', async ($, on) => {
+  const long = 'Default (recommended)'
+
+  on('clock.now', () => ({ value: Date.now() }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
+  on('command.register', () => ({ value: undefined }))
+  on('config.list', () => ({ value: [{ ...MODEL_ROW[0], value: long }] }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.model', () => ({ value: 'claude-opus-5' }))
+  on('session.usage', () => ({ value: USAGE }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 128,
+      stdout: '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
+
+  await $.session.start({ source: 'startup', cwd: '/repo' })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    // Narrower than the name, so a cut would show.
+    props: { ...PANE_PROPS, bodyColumns: 24 },
+    component: 'Pane',
+    requestId: 'cockpit',
+  })
+
+  const label = (await ui.find({ key: 'model' }))?.text ?? ''
+  expect(label).toContain(long)
+  expect(label).not.toContain('…')
+})
