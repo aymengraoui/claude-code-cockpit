@@ -1,10 +1,12 @@
 import { expect, test } from 'claude-code/testing'
 
+import { subjectOf, todosOf } from './lib/tools'
 import {
   ago,
   bar,
   dur,
   heat,
+  kilo,
   modelLabel,
   modeLabel,
   shortPath,
@@ -158,6 +160,10 @@ test('the pane draws the usage meters it has figures for', async ($, on) => {
 test('the pane draws the branch and the working tree it read from git', async ($, on) => {
   on('command.register', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 3 }))
   on('process.run', (_$, e) => ({
     value: {
       exitCode: 0,
@@ -243,4 +249,63 @@ test('the pane names the permission mode and lists earlier sessions', async ($, 
   expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
   expect(await ui.find({ text: 'fix the parser' })).toBeDefined()
   expect(await ui.find({ text: '2h ago' })).toBeDefined()
+})
+
+test('token counts read at a glance', () => {
+  expect(kilo(980)).toBe('980')
+  expect(kilo(74000)).toBe('74k')
+  expect(kilo(1200000)).toBe('1.2M')
+})
+
+test('a TodoWrite payload is taken only in the shape this build documents', () => {
+  const todos = [
+    { content: 'parse the status', status: 'completed', activeForm: 'parsing' },
+    { content: 'draw the pane', status: 'in_progress', activeForm: 'drawing' },
+  ]
+
+  expect(todosOf({ todos })?.length).toBe(2)
+  expect(todosOf({})).toBe(null)
+  expect(todosOf({ todos: [{ content: 'no status' }] })).toBe(null)
+})
+
+test('the subject column says what a call is about, per tool', () => {
+  expect(subjectOf('Bash', { command: 'npm test' })).toBe('npm test')
+  expect(subjectOf('Edit', { file_path: 'src/a.ts' })).toBe('src/a.ts')
+  expect(subjectOf('Agent', { description: 'find callers', prompt: 'x' })).toBe('find callers')
+  expect(subjectOf('TodoWrite', { todos: [] })).toBe('plan updated')
+  expect(subjectOf('Unknown', {})).toBe('')
+})
+
+test('outside a repository the pane says so instead of hiding the section', async ($, on) => {
+  on('clock.now', () => ({ value: Date.now() }))
+  on('command.register', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/home/me/notes' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 128,
+      stdout: '',
+      stderr: 'not a git repository',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', () => ({ sessionId: 'current', cwd: '/home/me/notes' }))
+
+  await $.session.start({ source: 'startup', cwd: '/home/me/notes' })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  expect(await ui.find({ text: 'notes' })).toBeDefined()
+  expect(await ui.find({ text: 'not a git repository' })).toBeDefined()
+  expect(await ui.find({ text: 'nothing yet' })).toBeDefined()
+  expect(await ui.find({ text: 'this is the first one recorded' })).toBeDefined()
 })

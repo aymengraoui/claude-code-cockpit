@@ -8,32 +8,38 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 
 ```
 ╭─ cockpit ──────────────────────────╮
+│ my-app · 7 turns                   │
 │ Opus 5 · high · plan               │
 │ ────────────────────────────────── │
-│ ctx  ▰▰▱▱▱  37%                    │
+│ ctx  ▰▰▱▱▱  37% 74k/200k           │
 │ 5h   ▰▱▱▱▱  12% ↻ 2h14             │
 │ week ▰▰▰▰▱  81% ↻ 4d               │
 │ cost $1.24 · 1h15m                 │
 │ ────────────────────────────────── │
 │ feat/parser ↑2                     │
-│ ────────────────────────────────── │
 │ WORKING TREE 3                     │
+│ +169 -12 in 3 files                │
 │ ● M src/parse.ts          +48 -12  │
 │ ● M src/parse.test.ts     +31  -0  │
 │   ? notes.md               +0  -0  │
 │ ────────────────────────────────── │
+│ PLAN 2/5                           │
+│ ▸ wire the numstat parser          │
+│ · show the plan in the pane        │
+│ · cover it with a test             │
+│ ────────────────────────────────── │
 │ AGENTS 1                           │
 │ ⟳ find every call site             │
 │ ────────────────────────────────── │
-│ SESSIONS 4                         │
-│ 2h ago   fix the parser rounding   │
-│ 1d ago   add the cockpit pane      │
-│ 4d ago   warp theme for windows    │
-│ ────────────────────────────────── │
-│ ACTIVITY                           │
+│ ACTIVITY 24                        │
 │ ✓ Edit     src/parse.ts     120ms  │
 │ ✗ Bash     npm run lint      0.8s  │
 │ ✓ Bash     npm test          3.1s  │
+│ ────────────────────────────────── │
+│ SESSIONS 4                         │
+│ now       enhance the cockpit      │
+│ 2h ago    fix the parser rounding  │
+│ 1d ago    add the cockpit pane     │
 ╰────────────────────────────────────╯
 ```
 
@@ -62,7 +68,9 @@ process it ever starts is `git`:
 
 | Shown | Where it comes from |
 | --- | --- |
+| project, turn count | `$.session.cwd()` and `$.session.turns()` |
 | model, effort | `turn.step`, as each request goes out |
+| the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
 | permission mode | `classic.UserPromptSubmit` and `classic.PostToolUse`, the only inputs that carry it |
 | context fill, 5h and weekly windows, cost | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
@@ -93,11 +101,18 @@ on('ui.render', { component: 'Pane', requestId: 'cockpit' }, async ($, e) => {
 })
 ```
 
-Three files do the work:
+Four files do the work:
 
 - `hooks/register.tsx` — the hooks and the pane's tree
-- `hooks/lib/format.ts` — bars, durations, path and model formatting; pure functions
-- `hooks/lib/git.ts` — parsers for the two git commands; pure functions
+- `hooks/lib/format.ts` — bars, durations, token counts, path and model formatting
+- `hooks/lib/git.ts` — parsers for the two git commands
+- `hooks/lib/tools.ts` — readers for tool-call payloads
+
+Everything outside `register.tsx` is pure functions, which is why most of the suite needs no
+engine at all.
+
+Sections that have nothing to show say so — `not a git repository`, `nothing yet` — rather
+than vanishing, so a quiet pane reads as quiet instead of broken.
 
 State lives in `$.state` rather than module variables, so a hot reload keeps the pane's
 contents, and a write redraws exactly the readers.

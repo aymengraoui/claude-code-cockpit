@@ -33,6 +33,12 @@ export type Repo = {
 /** A rate-limit window as the engine reports it. */
 export type Window = { percent: number; resetsAt: string | null }
 
+/** One item of the plan, as the `TodoWrite` tool last wrote it. */
+export type Todo = {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
 /** One earlier session, as the mod recorded it in `$.store`. */
 export type Past = {
   id: string
@@ -49,16 +55,28 @@ export type Cockpit = {
   effort: string | null
   /** Permission mode, as the classic hook inputs report it. */
   mode: string | null
-  /** Earlier sessions, newest first; the current one is not in it. */
-  history: Past[]
+  /** The directory the session runs in, by its last segment. */
+  project: string | null
+  /** This session's id, so the history can mark which entry is live. */
+  sessionId: string | null
+  /** Prompts answered so far. */
+  turns: number | null
   context: number | null
+  /** Input tokens the last response was answered over, and the window they sit in. */
+  tokens: number | null
+  window: number | null
   fiveHour: Window | null
   sevenDay: Window | null
   costUsd: number | null
   startedAt: number | null
   repo: Repo | null
+  /** True once git has been asked and said this is not a repository. */
+  isRepoChecked: boolean
+  todos: Todo[]
   activity: Activity[]
   agents: Activity[]
+  /** Recorded sessions, newest first, this one included. */
+  history: Past[]
 }
 
 declare module 'claude-code' {

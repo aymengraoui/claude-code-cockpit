@@ -67,6 +67,15 @@ export const shortText = (text: string, width: number): string => {
   return `${clean.slice(0, width - 1)}…`
 }
 
+/** `74k`, `1.2M`, `980` — a token count at a glance. */
+export const kilo = (n: number): string => {
+  if (!Number.isFinite(n)) return '0'
+  if (Math.abs(n) >= 1000000) return `${(n / 1000000).toFixed(1)}M`
+  if (Math.abs(n) >= 1000) return `${Math.round(n / 1000)}k`
+
+  return String(Math.round(n))
+}
+
 /** `2h ago`, `4d ago`, `just now` — for timestamps in the past. */
 export const ago = (at: number, now = Date.now()): string => {
   const minutes = Math.round((now - at) / 60000)
