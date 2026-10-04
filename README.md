@@ -149,6 +149,11 @@ instant. So a `ui.render` hook on `PromptHint` reads the mode out of the words i
 and passes the line through untouched. A render hook may not write `$.state`, so the mode is
 held in a module variable and the pane picks it up on its next tick.
 
+The words matched are the engine's own indicators — `manual mode`, `plan mode`,
+`accept edits`, `bypass permissions`, `don't ask`, `auto mode` — not the permission
+dialog's `auto mode on`, which is a different component. A line naming no mode leaves the
+last known one standing rather than reading as `default`.
+
 The pane is primed in `session.start`, so it is populated the moment it opens rather than
 filling in as events arrive: the engine already holds the usage figures, the model and the
 turn count, so they are asked for instead of waited on. `session.start` runs again on every

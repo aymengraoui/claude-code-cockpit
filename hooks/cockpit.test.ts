@@ -480,12 +480,22 @@ test('pressing a session opens it in a new terminal', async ($, on) => {
   expect(copied).toBe(false)
 })
 
-test('the mode is read from the words the hint line is drawing', () => {
-  expect(modeInHint('⏵⏵ auto mode on (shift+tab to cycle)')).toBe('auto')
-  expect(modeInHint('⏸ plan mode on')).toBe('plan')
-  expect(modeInHint('⏵⏵ accept edits on')).toBe('acceptEdits')
-  expect(modeInHint('? for shortcuts')).toBe('default')
-  expect(modeInHint('')).toBe('default')
+test("the mode is read from the engine's own indicator, not the dialog's wording", () => {
+  // The indicators come from the engine's mode table; the footer draws these exactly.
+  expect(modeInHint('⏵⏵ auto mode')).toBe('auto')
+  expect(modeInHint('auto mode · ? for shortcuts')).toBe('auto')
+  expect(modeInHint('⏸ plan mode')).toBe('plan')
+  expect(modeInHint('⏵⏵ accept edits')).toBe('acceptEdits')
+  expect(modeInHint('manual mode')).toBe('default')
+  expect(modeInHint('bypass permissions')).toBe('bypassPermissions')
+  expect(modeInHint("don't ask")).toBe('dontAsk')
+
+  // "manual mode" must not be read as "auto mode", whatever the order of the table.
+  expect(modeInHint('manual mode · esc to interrupt')).toBe('default')
+
+  // A line that names no mode leaves the last known one standing.
+  expect(modeInHint('? for shortcuts')).toBe(null)
+  expect(modeInHint('')).toBe(null)
 })
 
 test('the hint line is passed through untouched while its mode is read', async ($, on) => {

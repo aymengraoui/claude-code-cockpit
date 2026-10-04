@@ -232,19 +232,30 @@ let transcriptPath = ''
  */
 let liveMode: string | null = null
 
-/** The engine's own words for a mode, as the hint line spells them. */
-const MODE_IN_HINT: ReadonlyArray<readonly [RegExp, string]> = [
-  [/auto mode on/i, 'auto'],
-  [/plan mode on/i, 'plan'],
-  [/accept edits on/i, 'acceptEdits'],
-  [/bypass(ing)? permissions/i, 'bypassPermissions'],
+/**
+ * The engine's own indicator for each mode, which is what the footer draws.
+ *
+ * From its mode table: `manual mode`, `plan mode`, `accept edits`, `bypass permissions`,
+ * `don't ask`, `auto mode`. The permission dialog says "auto mode on" instead — a
+ * different component, and not what the hint line carries.
+ *
+ * Longest first, so `manual mode` is never taken for `auto mode`.
+ */
+const MODE_INDICATORS: ReadonlyArray<readonly [string, string]> = [
+  ['bypass permissions', 'bypassPermissions'],
+  ['accept edits', 'acceptEdits'],
+  ['manual mode', 'default'],
+  ['plan mode', 'plan'],
+  ['auto mode', 'auto'],
+  ["don't ask", 'dontAsk'],
 ]
 
-/** The mode a hint line names, or `default` when it names none. */
-export const modeInHint = (hint: string): string => {
-  for (const [pattern, mode] of MODE_IN_HINT) if (pattern.test(hint)) return mode
+/** The mode a hint line names, or null when it names none of them. */
+export const modeInHint = (hint: string): string | null => {
+  const line = hint.toLowerCase()
+  for (const [indicator, mode] of MODE_INDICATORS) if (line.includes(indicator)) return mode
 
-  return 'default'
+  return null
 }
 
 /** One ticker at a time, however many times the pane is opened. */
@@ -393,7 +404,8 @@ export const register: Register = on => {
   // The hint line redraws the instant the mode is toggled: the only live signal there is.
   // Nothing is changed here — the line is read, and the pane picks it up on its next tick.
   on('ui.render', { component: 'PromptHint' }, ($, e, next) => {
-    liveMode = modeInHint(e.props.hint ?? '')
+    const named = modeInHint(e.props.hint ?? '')
+    if (named !== null) liveMode = named
 
     return next(e)
   })
