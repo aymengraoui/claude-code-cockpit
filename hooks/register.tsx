@@ -39,7 +39,6 @@ const TICK_MS = 2000
 const EMPTY: Cockpit = {
   model: null,
   effort: null,
-  modelChoice: null,
   mode: null,
   project: null,
   cwd: null,
@@ -188,36 +187,25 @@ const openSession = async (
 }
 
 /**
- * The name /config shows for the current model — the same one /model shows — so the pane
- * never names a model differently from the menus.
- */
-const readModelName = async ($: EngineInterface): Promise<string | null> => {
-  try {
-    const row = (await $.config.list()).find(one => one.key === 'model')
-
-    return typeof row?.value === 'string' ? row.value : null
-  } catch {
-    return null
-  }
-}
-
-/**
- * Open the real `/model` picker.
+ * Open one of the engine's own pickers — `/model`, `/effort` — by running its command.
  *
- * Its list depends on the account — plan-gated models, context-window variants, a model
- * that wants consent first — and none of that is exposed to a plugin, so no copy of it
- * here could be exact. Running the command itself is: the same list, the same switching.
- * Should the engine refuse the run, `/model` is left in the prompt box, one Enter away.
+ * What they offer depends on the account and the model (plan-gated models, the effort
+ * levels a model takes), and none of it is exposed to a plugin, so no copy of a list here
+ * could be exact. Running the command is: the same list, the same switching. A run that
+ * cannot happen rejects, and the command is left in the prompt box, one Enter away.
  */
-const openModelPicker = async ($: EngineInterface): Promise<void> => {
+const openPicker = async ($: EngineInterface, command: 'model' | 'effort'): Promise<void> => {
   try {
-    // A run that cannot happen rejects — an unknown name, or a turn waiting on a hook.
-    await $.command.run({ command: 'model' })
+    await $.command.run({ command })
   } catch {
-    const filled = await $.prompt.fill({ text: '/model' }).catch(() => ({ isFilled: false }))
-    $.ui.toast(filled.isFilled ? 'Press Enter to choose a model' : 'Run /model to choose a model')
+    const filled = await $.prompt.fill({ text: `/${command}` }).catch(() => ({ isFilled: false }))
+    $.ui.toast(filled.isFilled ? `Press Enter to choose the ${command}` : `Run /${command}`)
   }
 }
+
+/** An effort level as its name: `high` reads as `High`. */
+export const effortLabel = (level: string): string =>
+  level === '' ? level : level.charAt(0).toUpperCase() + level.slice(1)
 
 /** This session's transcript, which says which platform this is. */
 let transcriptPath = ''
@@ -284,10 +272,14 @@ const startTicking = ($: EngineInterface): void => {
         const panes = await $.ui.panes().catch(() => [])
         if (!panes.some(one => one.id === PANE)) break
 
-        const usage = await $.session.usage().catch(() => null)
+        const [usage, model] = await Promise.all([
+          $.session.usage().catch(() => null),
+          $.session.model().catch(() => null),
+        ])
         await update($, state, prev => ({
           ...prev,
           ...(usage === null ? {} : fromUsage(prev, usage)),
+          model: model === null ? prev.model : modelLabel(model),
           mode: liveMode ?? prev.mode,
           tickedAt: Date.now(),
         }))
@@ -307,7 +299,7 @@ export const register: Register = on => {
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
-    const [now, cwd, id, usage, model, turns, repo, storedDir, modelName] = await Promise.all([
+    const [now, cwd, id, usage, model, turns, repo, storedDir] = await Promise.all([
       $.clock.now(),
       $.session.cwd().catch(() => ''),
       $.session.id().catch(() => ''),
@@ -316,7 +308,6 @@ export const register: Register = on => {
       $.session.turns().catch(() => null),
       readRepo($),
       rememberedDir($),
-      readModelName($),
     ])
 
     const segments = toPosix(cwd).split('/').filter(one => one !== '')
@@ -327,7 +318,6 @@ export const register: Register = on => {
       cwd: cwd === '' ? null : toPosix(cwd),
       sessionId: id === '' ? null : id,
       model: model === null ? prev.model : modelLabel(model),
-      modelChoice: modelName,
       turns: turns ?? prev.turns,
       repo,
       isRepoChecked: true,
@@ -373,14 +363,16 @@ export const register: Register = on => {
 
   on('classic.Stop', async ($, e, next) => {
     const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
-    if (mode !== null) await update($, state, prev => ({ ...prev, mode }))
+    const effort = typeof e.effort?.level === 'string' ? e.effort.level : null
+    await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode, effort: effort ?? prev.effort }))
 
     return next(e)
   })
 
   on('classic.PostToolUse', async ($, e, next) => {
     const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
-    if (mode !== null) await update($, state, prev => ({ ...prev, mode }))
+    const effort = typeof e.effort?.level === 'string' ? e.effort.level : null
+    await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode, effort: effort ?? prev.effort }))
 
     return next(e)
   })
@@ -460,11 +452,10 @@ export const register: Register = on => {
 
   // The working tree is re-read between turns, not per edit: one pair of git calls a turn.
   on('turn.complete', async ($, e, next) => {
-    const [repo, turns, history, modelName] = await Promise.all([
+    const [repo, turns, history] = await Promise.all([
       readRepo($),
       $.session.turns().catch(() => null),
       dir === '' ? Promise.resolve(null) : readSessions($, dir),
-      readModelName($),
     ])
     await update($, state, prev => ({
       ...prev,
@@ -472,7 +463,6 @@ export const register: Register = on => {
       isRepoChecked: true,
       turns,
       history: history ?? prev.history,
-      modelChoice: modelName,
     }))
 
     return next(e)
@@ -541,10 +531,16 @@ export const register: Register = on => {
           <Button
             key="model"
             plain
-            label={`${shortText(it.modelChoice ?? it.model ?? 'no request yet', Math.max(8, columns - 18))} ▾`}
-            onPress={() => openModelPicker($)}
+            label={`${it.model ?? 'model'} ▾`}
+            onPress={() => openPicker($, 'model')}
           />
-          {it.effort !== null && <Text color={TOKYO.blue}> · {it.effort}</Text>}
+          <Text color={TOKYO.dim}> · </Text>
+          <Button
+            key="effort"
+            plain
+            label={`${it.effort === null ? 'effort' : effortLabel(it.effort)} ▾`}
+            onPress={() => openPicker($, 'effort')}
+          />
           {it.mode !== null && <Text color={TOKYO.accent}> · {modeLabel(it.mode)}</Text>}
         </Box>
 

@@ -53,8 +53,6 @@ export type Past = {
 export type Cockpit = {
   model: string | null
   effort: string | null
-  /** The name /model and /config show for the current model. */
-  modelChoice: string | null
   /** Permission mode, as the classic hook inputs report it. */
   mode: string | null
   /** The directory the session runs in, by its last segment. */

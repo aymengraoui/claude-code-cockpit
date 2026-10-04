@@ -9,7 +9,7 @@ import {
   toPast,
 } from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
-import { modeInHint } from './register'
+import { effortLabel, modeInHint } from './register'
 import { heatOf, TOKYO } from './lib/palette'
 import { subjectOf, todosOf } from './lib/tools'
 import {
@@ -554,10 +554,11 @@ const startPane = async ($: Parameters<Parameters<typeof test>[1]>[0], on: Param
   })
 }
 
-test('the model line names the model as /config and /model do', async ($, on) => {
+test('the model line names the running model, version and all', async ($, on) => {
   const ui = await startPane($, on)
 
-  expect((await ui.find({ key: 'model' }))?.text).toContain('Opus 5')
+  // claude-opus-5-5 is what is running; the line says so as /model does.
+  expect((await ui.find({ key: 'model' }))?.text).toContain('Opus 5.5')
 })
 
 test('pressing the model opens the real /model picker', async ($, on) => {
@@ -596,4 +597,37 @@ test('when /model cannot be run from here, it is left in the prompt box', async 
 
   expect(filled).toEqual(['/model'])
   expect(toasts.join(' ')).toContain('Enter')
+  expect(toasts.join(' ')).toContain('model')
+})
+
+test('an effort level reads as its name', () => {
+  expect(effortLabel('high')).toBe('High')
+  expect(effortLabel('xhigh')).toBe('Xhigh')
+  expect(effortLabel('')).toBe('')
+})
+
+test('pressing the effort opens the real /effort picker', async ($, on) => {
+  const ran: string[] = []
+  on('command.run', (_$, e) => {
+    ran.push(e.command)
+
+    return { text: '' }
+  })
+
+  const ui = await startPane($, on)
+  // Before any request the level is not known yet, but the picker is still one press away.
+  expect((await ui.find({ key: 'effort' }))?.text).toContain('effort')
+
+  await ui.press({ key: 'effort' })
+
+  expect(ran).toEqual(['effort'])
+})
+
+test('a stop reports the effort, which the line then names', async ($, on) => {
+  on('classic.Stop', () => ({}))
+
+  const ui = await startPane($, on)
+  await $.classic.Stop({ permission_mode: 'auto', effort: { level: 'high' }, stop_hook_active: false })
+
+  expect((await ui.find({ key: 'effort' }))?.text).toContain('High')
 })

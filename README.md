@@ -9,7 +9,7 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 ```
 ╭─ cockpit ──────────────────────────╮
 │ my-app · 7 turns                   │
-│ Opus 5.5 ▾ · high · plan           │
+│ Opus 5.5 ▾ · High ▾ · plan         │
 │ ────────────────────────────────── │
 │ ctx  ▰▰▱▱▱  37% 74k/200k           │
 │ 5h   ▰▱▱▱▱  12% ↻ 2h14             │
@@ -74,9 +74,9 @@ process it ever starts is `git`:
 | --- | --- |
 | project, turn count | `$.session.cwd()` and `$.session.turns()` |
 | everything above, at launch | `$.session.usage()`, `$.session.model()` and `$.session.turns()`, asked for in `session.start` |
-| model, effort | `turn.step`, as each request goes out |
+| model | `$.session.model()`, every tick |
+| effort | `turn.step`, and `effort.level` on the classic hook inputs |
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
-| the model's name | the `/config` model row's value, the name `/model` shows too |
 | permission mode | the words the prompt's hint line is drawing, read as it redraws |
 | context fill, 5h and weekly windows | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
@@ -93,16 +93,17 @@ Titles are cached in `$.store`: a session's first prompt cannot change, so each 
 read at most once ever and later listings only stat the directory. The directory itself is
 cached too, so a reload lists the sessions before any prompt has been typed.
 
-**Press the model to change it.** This opens the real `/model` picker, via
-`$.command.run({ command: 'model' })`, which runs a slash command as if you had typed it.
-The pane deliberately has no model list of its own. `/model`'s list depends on your
-account (plan-gated models, context-window variants, models that need consent first), and
-none of that is exposed to a plugin, so any copy here would be incomplete. Running the
-command itself gives the same list and the same switching. If the engine refuses the run,
-`/model` is put in the prompt box instead, one Enter away.
+**Press the model or the effort to change it.** Each opens the engine's own picker, `/model`
+or `/effort`, through `$.command.run`, which runs a slash command as if it were typed. The
+pane keeps no list of its own on purpose: what those pickers offer depends on the account
+and the model (plan-gated models, context-window variants, the effort levels a model
+takes), and none of it is exposed to a plugin, so a copy could never be exact. Should the
+run be refused, the command is left in the prompt box, one Enter away.
 
-The model line uses the name `/config` and `/model` show, so the pane never names a model
-differently from the menus.
+The model line names the running model, as `/model` does (`Opus 5.5`), read from
+`$.session.model()` on every tick so a switch shows at once. Effort has no setting to read,
+so it arrives with each request and with the classic hook inputs, which carry
+`effort.level` — a change made with `/effort` shows at the next tool call or turn end.
 
 **Press a session to open it.** The hook API exposes no way to switch sessions in place —
 `--resume` is a launch flag — so a press opens `claude --resume <id>` in a terminal of its
