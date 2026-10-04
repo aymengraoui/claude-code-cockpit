@@ -1,0 +1,92 @@
+/** Pure formatting helpers. No engine, no I/O — so the tests can be plain unit tests. */
+
+const BACKSLASH = String.fromCharCode(92)
+
+/** Windows paths read as POSIX ones, so one code path handles both. */
+export const toPosix = (path: string): string => path.split(BACKSLASH).join('/')
+
+const FILLED = '▰'
+const EMPTY = '▱'
+
+/** A 0-100 percentage as a bar of `width` cells. */
+export const bar = (percent: number, width = 5): string => {
+  const safe = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0
+  const filled = Math.round((safe / 100) * width)
+
+  return FILLED.repeat(filled) + EMPTY.repeat(width - filled)
+}
+
+/** The palette key a 0-100 figure should be drawn in: calm until it is worth noticing. */
+export const heat = (percent: number): string => {
+  if (percent >= 90) return 'error'
+  if (percent >= 75) return 'warning'
+  if (percent >= 50) return 'claude'
+
+  return 'success'
+}
+
+/** `2h14`, `18m`, `4d` until an ISO timestamp; null when it is past or unparsable. */
+export const until = (iso: string | null, now = Date.now()): string | null => {
+  if (iso === null) return null
+  const ms = new Date(iso).getTime() - now
+  if (!Number.isFinite(ms) || ms <= 0) return null
+
+  const minutes = Math.round(ms / 60000)
+  if (minutes >= 1440) return `${Math.round(minutes / 1440)}d`
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
+
+  return `${minutes}m`
+}
+
+/** A duration as `840ms`, `3.1s`, `2m04`. */
+export const dur = (ms: number): string => {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  const minutes = Math.floor(ms / 60000)
+
+  return `${minutes}m${String(Math.round((ms % 60000) / 1000)).padStart(2, '0')}`
+}
+
+/**
+ * A path cut to `width` from the left, so the filename always survives:
+ * `src/engine/parse.ts` at 14 becomes `…ngine/parse.ts`.
+ */
+export const shortPath = (path: string, width: number): string => {
+  const clean = toPosix(path)
+  if (clean.length <= width || width < 2) return clean
+
+  return `…${clean.slice(clean.length - (width - 1))}`
+}
+
+/** A command cut to `width` from the right, where the verb is. */
+export const shortText = (text: string, width: number): string => {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (clean.length <= width) return clean
+  if (width < 2) return clean.slice(0, width)
+
+  return `${clean.slice(0, width - 1)}…`
+}
+
+const MODEL_LABELS: Readonly<Record<string, string>> = {
+  'claude-opus-5': 'Opus 5',
+  'claude-opus-5-5': 'Opus 5.5',
+  'claude-sonnet-5-5': 'Sonnet 5.5',
+  'claude-fable-5-1': 'Fable 5.1',
+  'claude-haiku-4-5-20251001': 'Haiku 4.5',
+}
+
+/** `claude-sonnet-5-5` as `Sonnet 5.5`; an unknown id prettified rather than hidden. */
+export const modelLabel = (id: string): string => {
+  const known = MODEL_LABELS[id]
+  if (known !== undefined) return known
+
+  const [family, ...rest] = id
+    .replace(/^claude-/, '')
+    .replace(/-\d{8}$/, '')
+    .split('-')
+  if (family === undefined || family === '') return id
+  const name = family.charAt(0).toUpperCase() + family.slice(1)
+  const version = rest.join('.')
+
+  return version === '' ? name : `${name} ${version}`
+}

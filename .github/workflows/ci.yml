@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      # Both commands read the plugin locally and need no account.
+      - name: Validate the manifest, hooks and every $ call
+        run: claude plugin validate .
+
+      - name: Run the suite against the engine
+        run: claude plugin test .

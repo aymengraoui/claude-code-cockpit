@@ -1,0 +1,9 @@
+{
+  "name": "cockpit",
+  "version": "0.1.0",
+  "description": "A sidebar for Claude Code in the terminal: usage, cost, branch, the working tree, tool activity and running agents, all beside the conversation.",
+  "author": { "name": "Aymen Graoui", "url": "https://github.com/aymengraoui" },
+  "homepage": "https://github.com/aymengraoui/claude-code-cockpit",
+  "keywords": ["claude-code", "plugin", "mod", "ui", "pane", "sidebar", "statusline"],
+  "types": "./types/index.d.ts"
+}
