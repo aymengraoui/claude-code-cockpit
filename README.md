@@ -8,7 +8,8 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 
 ```
 ╭─ cockpit ──────────────────────────╮
-│ my-app · 7 turns · auto mode on    │
+│ my-app · 7 turns                   │
+│ Opus 5.5 ▾ · High ▾ · auto mode on │
 │ ────────────────────────────────── │
 │ ctx  ▰▰▱▱▱  37% 74k/200k ▾         │
 │   ▰▱▱ System tools 14k             │
@@ -28,7 +29,6 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 │   fix the parser rounding          │
 │                                    │
 │ ────────────────────────────────── │
-│ Opus 5.5 ▾ · High ▾                │
 │ compact · rewind · resume · clear  │
 ╰────────────────────────────────────╯
 ```
@@ -109,8 +109,8 @@ is cut, and says how much was left out.
 counts, largest first, deferred tool schemas left out since they cost nothing until loaded —
 with `compact` waiting in the toolbar below.
 
-**Every control sits in a toolbar pinned to the bottom edge** — the model and effort pickers,
-then `compact · rewind · resume · clear` — so they never scroll away with the content above:
+**The quick actions sit in a toolbar pinned to the bottom edge** — `compact · rewind ·
+resume · clear` — so they never scroll away with the content above:
 the pane is drawn exactly as tall as its body, the content growing into what is left and
 clipped there. Each quick action runs the engine's own command; `compact` shows a `⚠` past
 85% context. `clear` discards the conversation, so it asks twice: the first

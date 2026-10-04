@@ -841,7 +841,7 @@ test('a pane reloaded over an older version state still draws', async ($, on) =>
 const childrenOf = (node: unknown): unknown[] =>
   (node as { children?: unknown[] }).children ?? []
 
-test('every control sits in a toolbar pinned to the bottom of the pane', async ($, on) => {
+test('the model and effort lead the pane; the quick actions are pinned to its bottom', async ($, on) => {
   const ui = await startPane($, on)
   const root = (await ui.drawn()) as { props?: { height?: number } }
 
@@ -849,14 +849,12 @@ test('every control sits in a toolbar pinned to the bottom of the pane', async (
   // something that scrolls away with the content above it.
   expect(root.props?.height).toBe(PANE_PROPS.scroll.bodyRows)
 
-  const [content, , pickers, actions] = childrenOf(root)
+  const [content, , actions] = childrenOf(root)
   expect((content as { props?: { flexGrow?: number } }).props?.flexGrow).toBe(1)
-  expect(JSON.stringify(pickers)).toContain('"key":"model"')
-  expect(JSON.stringify(pickers)).toContain('"key":"effort"')
+  expect(JSON.stringify(content)).toContain('"key":"model"')
+  expect(JSON.stringify(content)).toContain('"key":"effort"')
   expect(JSON.stringify(actions)).toContain('"key":"action-compact"')
   expect(JSON.stringify(actions)).toContain('"key":"action-clear"')
-  // And none of them is up in the content any more.
-  expect(JSON.stringify(content)).not.toContain('"key":"model"')
   expect(JSON.stringify(content)).not.toContain('"key":"action-')
 })
 

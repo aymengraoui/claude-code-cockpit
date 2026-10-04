@@ -632,6 +632,21 @@ export const register: Register = on => {
               {it.project ?? 'claude'}
             </Text>
             {it.turns !== null && <Text color={TOKYO.dim}> · {it.turns} turns</Text>}
+          </Box>
+          <Box>
+            <Button
+              key="model"
+              plain
+              label={`${it.model ?? 'model'} ▾`}
+              onPress={() => runCommand($, 'model')}
+            />
+            <Text color={TOKYO.dim}> · </Text>
+            <Button
+              key="effort"
+              plain
+              label={`${it.effort === null ? 'effort' : effortLabel(it.effort)} ▾`}
+              onPress={() => runCommand($, 'effort')}
+            />
             {it.mode !== null && <Text color={TOKYO.accent}> · {footerMode(it.mode)}</Text>}
           </Box>
 
@@ -772,21 +787,6 @@ export const register: Register = on => {
         </Box>
 
         <Text color={TOKYO.line}>{rule}</Text>
-        <Box>
-          <Button
-            key="model"
-            plain
-            label={`${it.model ?? 'model'} ▾`}
-            onPress={() => runCommand($, 'model')}
-          />
-          <Text color={TOKYO.dim}> · </Text>
-          <Button
-            key="effort"
-            plain
-            label={`${it.effort === null ? 'effort' : effortLabel(it.effort)} ▾`}
-            onPress={() => runCommand($, 'effort')}
-          />
-        </Box>
         <Box>
           {QUICK_ACTIONS.map((action, index) => (
             <Box key={`action-row-${action}`}>
