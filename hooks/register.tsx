@@ -19,10 +19,8 @@ import { subjectOf, todosOf } from './lib/tools'
 import {
   dirOf,
   MAX_READ_BYTES,
-  modeFromTranscript,
   pickRecent,
   resumeCommand,
-  tailCommand,
   titleFromTranscript,
   toPast,
 } from './lib/sessions'
@@ -58,7 +56,6 @@ const EMPTY: Cockpit = {
   repo: null,
   isRepoChecked: false,
   todos: [],
-  activity: [],
   agents: [],
   history: [],
   tickedAt: null,
@@ -72,7 +69,7 @@ const WRITERS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
 /** Paths this session wrote to. Rebuilt on reload, which only dims the dots. */
 const mine = new Set<string>()
 
-const ACTIVITY_KEPT = 40
+const AGENTS_KEPT = 12
 
 /** The titles read so far, by session id; they never change, so they are cached for good. */
 const readTitles = async ($: EngineInterface): Promise<Record<string, string>> => {
@@ -174,7 +171,7 @@ const openSession = async (
 ): Promise<void> => {
   const command = resumeCommand(id)
   // The transcript's path always says which platform this is; a cwd may not be known yet.
-  const isWindows = isWindowsPath(watched.path === '' ? cwd : watched.path)
+  const isWindows = isWindowsPath(transcriptPath === '' ? cwd : transcriptPath)
 
   for (const argv of launchCommands(id, cwd, isWindows)) {
     try {
@@ -193,33 +190,32 @@ const openSession = async (
   $.ui.toast(copied.isCopied ? `Copied: ${command}` : `Run it yourself: ${command}`)
 }
 
-/** This session's transcript, and the size it had when its tail was last read. */
-let watched = { path: '', size: -1 }
+/** This session's transcript, which says which platform this is. */
+let transcriptPath = ''
 
 /**
- * The mode the session is in, read from the end of its own transcript.
+ * The permission mode, as the footer is drawing it this instant.
  *
- * The hook inputs carry `permission_mode` only on a prompt or a tool result, so a mode
- * changed while the session sits idle would go unnoticed until the next message. Claude
- * Code does write a `permission-mode` row when it changes, but a transcript runs to
- * megabytes and `$.fs.read` has no range — so the file is only tailed when its size has
- * moved, which costs nothing at all while nothing is happening.
+ * No event fires when the mode is toggled, and the transcript only records it at a turn
+ * boundary, so the one live source is the hint line under the prompt: it redraws the moment
+ * shift+tab is pressed. A `ui.render` hook may not write `$.state` while drawing, so the
+ * mode is kept here and the pane reads it on its next tick.
  */
-const polledMode = async ($: EngineInterface): Promise<string | null> => {
-  if (watched.path === '') return null
+let liveMode: string | null = null
 
-  try {
-    const { size } = await $.fs.stat(watched.path)
-    if (size === watched.size) return null
-    watched = { ...watched, size }
+/** The engine's own words for a mode, as the hint line spells them. */
+const MODE_IN_HINT: ReadonlyArray<readonly [RegExp, string]> = [
+  [/auto mode on/i, 'auto'],
+  [/plan mode on/i, 'plan'],
+  [/accept edits on/i, 'acceptEdits'],
+  [/bypass(ing)? permissions/i, 'bypassPermissions'],
+]
 
-    const tail = await $.process.run(tailCommand(watched.path, isWindowsPath(watched.path)))
-    if (tail.exitCode !== 0) return null
+/** The mode a hint line names, or `default` when it names none. */
+export const modeInHint = (hint: string): string => {
+  for (const [pattern, mode] of MODE_IN_HINT) if (pattern.test(hint)) return mode
 
-    return modeFromTranscript(tail.stdout)
-  } catch {
-    return null
-  }
+  return 'default'
 }
 
 /** One ticker at a time, however many times the pane is opened. */
@@ -249,11 +245,10 @@ const startTicking = ($: EngineInterface): void => {
         if (!panes.some(one => one.id === PANE)) break
 
         const usage = await $.session.usage().catch(() => null)
-        const mode = await polledMode($)
         await update($, state, prev => ({
           ...prev,
           ...(usage === null ? {} : fromUsage(prev, usage)),
-          mode: mode ?? prev.mode,
+          mode: liveMode ?? prev.mode,
           tickedAt: Date.now(),
         }))
       }
@@ -323,7 +318,7 @@ export const register: Register = on => {
   on('classic.UserPromptSubmit', async ($, e, next) => {
     const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
     if (typeof e.transcript_path === 'string' && e.transcript_path !== '') {
-      watched = { path: e.transcript_path, size: -1 }
+      transcriptPath = e.transcript_path
       const named = dirOf(e.transcript_path)
       if (named !== dir) {
         dir = named
@@ -353,7 +348,7 @@ export const register: Register = on => {
   // session's transcript beside it — so the list is its sessions, not the mod's bookkeeping.
   on('classic.SessionStart', async ($, e, next) => {
     const path = typeof e.transcript_path === 'string' ? e.transcript_path : ''
-    if (path !== '') watched = { path, size: -1 }
+    if (path !== '') transcriptPath = path
     const named = path === '' ? '' : dirOf(path)
     if (named !== '') {
       dir = named
@@ -361,6 +356,14 @@ export const register: Register = on => {
       const history = await readSessions($, named)
       await update($, state, prev => ({ ...prev, history }))
     }
+
+    return next(e)
+  })
+
+  // The hint line redraws the instant the mode is toggled: the only live signal there is.
+  // Nothing is changed here — the line is read, and the pane picks it up on its next tick.
+  on('ui.render', { component: 'PromptHint' }, ($, e, next) => {
+    liveMode = modeInHint(e.props.hint ?? '')
 
     return next(e)
   })
@@ -386,7 +389,7 @@ export const register: Register = on => {
     const input = e.input as Record<string, unknown>
     const subject = subjectOf(e.tool, input)
     const entry: Activity = { id: e.tool_use_id, tool: e.tool, subject, ms: null, isError: null }
-    const key = e.tool === 'Agent' ? 'agents' : 'activity'
+    const isAgent = e.tool === 'Agent'
 
     // The plan is the tool's own payload, so the pane shows it as Claude writes it.
     const todos = e.tool === 'TodoWrite' ? todosOf(input) : null
@@ -394,7 +397,7 @@ export const register: Register = on => {
     await update($, state, prev => ({
       ...prev,
       ...(todos === null ? {} : { todos }),
-      [key]: [...prev[key], entry].slice(-ACTIVITY_KEPT),
+      ...(isAgent ? { agents: [...prev.agents, entry].slice(-AGENTS_KEPT) } : {}),
     }))
 
     if (WRITERS.has(e.tool) && subject !== '') mine.add(toPosix(subject))
@@ -403,10 +406,12 @@ export const register: Register = on => {
     const result = await next(e)
     const done = { ms: (await $.clock.now()) - startedAt, isError: result.isError === true }
 
-    await update($, state, prev => ({
-      ...prev,
-      [key]: prev[key].map(one => (one.id === entry.id ? { ...one, ...done } : one)),
-    }))
+    if (isAgent) {
+      await update($, state, prev => ({
+        ...prev,
+        agents: prev.agents.map(one => (one.id === entry.id ? { ...one, ...done } : one)),
+      }))
+    }
 
     return result
   })
@@ -437,12 +442,11 @@ export const register: Register = on => {
     const rows = Math.max(8, e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 24)
 
     const changes = it.repo?.changes ?? []
-    const activity = [...it.activity].reverse()
     const open = it.todos.filter(one => one.status !== 'completed')
     const doneCount = it.todos.length - open.length
 
     // The lists share what is left under the fixed rows; each keeps at least two.
-    const listRoom = Math.max(2, Math.floor((rows - 20) / 3))
+    const listRoom = Math.max(3, Math.floor((rows - 18) / 2))
     const rule = '─'.repeat(columns)
     const added = changes.reduce((sum, one) => sum + one.added, 0)
     const removed = changes.reduce((sum, one) => sum + one.removed, 0)
@@ -587,20 +591,6 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
-
-        <Text color={TOKYO.line}>{rule}</Text>
-        {Head({ title: "ACTIVITY", count: it.activity.length })}
-        {activity.length === 0 && <Text color={TOKYO.dim}>nothing yet</Text>}
-        {activity.slice(0, listRoom).map(call => (
-          <Box key={`call-${call.id}`}>
-            <Text color={call.isError === null ? TOKYO.orange : call.isError ? TOKYO.red : 'success'}>
-              {call.isError === null ? '⟳ ' : call.isError ? '✗ ' : '✓ '}
-            </Text>
-            <Text color={TOKYO.dim}>{call.tool.slice(0, 8).padEnd(9)}</Text>
-            <Text color={TOKYO.text}>{shortText(call.subject, Math.max(4, columns - 18))}</Text>
-            {call.ms !== null && <Text color={TOKYO.dim}> {dur(call.ms)}</Text>}
-          </Box>
-        ))}
 
         <Text color={TOKYO.line}>{rule}</Text>
         {Head({ title: "SESSIONS", count: it.history.length })}

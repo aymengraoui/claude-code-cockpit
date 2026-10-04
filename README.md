@@ -31,11 +31,6 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 │ AGENTS 1                           │
 │ ⟳ find every call site             │
 │ ────────────────────────────────── │
-│ ACTIVITY 24                        │
-│ ✓ Edit     src/parse.ts     120ms  │
-│ ✗ Bash     npm run lint      0.8s  │
-│ ✓ Bash     npm test          3.1s  │
-│ ────────────────────────────────── │
 │ SESSIONS 4                         │
 │ ▸ enhance the cockpit              │
 │   fix the parser rounding          │
@@ -61,7 +56,15 @@ as a plugin with `/plugin`.
 
 The pane opens itself at session start on a terminal at least 144 columns wide — the width at
 which an unasked pane is allowed to seat itself. Narrower than that, or if you close it, open it
-with `/cockpit`.
+with `/cockpit`, or bind a key to it:
+
+```json
+// ~/.claude/keybindings.json
+{ "bindings": [ { "context": "Global", "bindings": { "alt+c": "command:cockpit" } } ] }
+```
+
+Any action spelled `command:<name>` runs that slash command, so `command:cockpit` opens the
+pane from anywhere.
 
 ## What it reads
 
@@ -74,11 +77,10 @@ process it ever starts is `git`:
 | everything above, at launch | `$.session.usage()`, `$.session.model()` and `$.session.turns()`, asked for in `session.start` |
 | model, effort | `turn.step`, as each request goes out |
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
-| permission mode | `classic.UserPromptSubmit`, `classic.Stop` and `classic.PostToolUse` carry it; between turns it is read from the transcript's own `permission-mode` rows |
+| permission mode | the words the prompt's hint line is drawing, read as it redraws |
 | context fill, 5h and weekly windows, cost | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
-| tool activity, durations, failures | `tool.call`, timed around `next(e)` |
-| running agents | `tool.call` on the `Agent` tool |
+| running agents | `tool.call` on the `Agent` tool, timed around `next(e)` |
 | Claude Code's sessions | the transcripts in this project's transcript directory, found through the `transcript_path` the classic hook inputs carry |
 
 The session list is Claude Code's own, not the mod's bookkeeping. Claude Code writes one
@@ -135,12 +137,12 @@ The pane ticks every two seconds while it is open: durations and resets are read
 so a tick that stamps the state is enough to move every clock, and it re-reads the usage
 figures as it goes. It stops the moment the pane is closed and never runs twice.
 
-The permission mode is the awkward one. The hook inputs carry it on a prompt, a tool result
-and a stop, so a mode changed mid-conversation is seen at once — but one changed while the
-session sits idle would not be. Claude Code writes a `permission-mode` row to the transcript
-whenever it changes, and that is the only live record of it, so the tick tails the transcript
-to read it. A transcript runs to megabytes and `$.fs.read` has no range, so the tail is only
-taken when the file's size has moved: while nothing is happening, the poll costs one `stat`.
+The permission mode is the awkward one. No event fires when it is toggled, and the transcript
+records it only at a turn boundary, so neither a hook input nor a file sees a shift+tab while
+the session sits idle. What does see it is the hint line under the prompt: it redraws that
+instant. So a `ui.render` hook on `PromptHint` reads the mode out of the words it is drawing
+and passes the line through untouched. A render hook may not write `$.state`, so the mode is
+held in a module variable and the pane picks it up on its next tick.
 
 The pane is primed in `session.start`, so it is populated the moment it opens rather than
 filling in as events arrive: the engine already holds the usage figures, the model and the

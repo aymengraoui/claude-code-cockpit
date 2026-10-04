@@ -1,4 +1,4 @@
-/** One finished or running tool call, newest last. */
+/** One running or finished subagent, newest last. */
 export type Activity = {
   id: string
   /** Tool name as the engine calls it (`Edit`, `Bash`, `Agent`, ...). */
@@ -75,7 +75,6 @@ export type Cockpit = {
   /** True once git has been asked and said this is not a repository. */
   isRepoChecked: boolean
   todos: Todo[]
-  activity: Activity[]
   agents: Activity[]
   /** Claude Code's recent sessions, newest first, this one included. */
   history: Past[]

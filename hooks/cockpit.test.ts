@@ -3,14 +3,13 @@ import { expect, test } from 'claude-code/testing'
 import {
   dirOf,
   idOf,
-  modeFromTranscript,
   pickRecent,
   resumeCommand,
-  tailCommand,
   titleFromTranscript,
   toPast,
 } from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
+import { modeInHint } from './register'
 import { heatOf, TOKYO } from './lib/palette'
 import { subjectOf, todosOf } from './lib/tools'
 import {
@@ -301,7 +300,6 @@ test('the pane is primed at launch, and says so where a section is empty', async
   expect(await ui.find({ text: '24k/200k' })).toBeDefined()
   expect(await ui.find({ text: '$0.12' })).toBeDefined()
   expect(await ui.find({ text: 'not a git repository' })).toBeDefined()
-  expect(await ui.find({ text: 'nothing yet' })).toBeDefined()
   expect(await ui.find({ text: 'no transcripts found' })).toBeDefined()
 })
 
@@ -428,26 +426,6 @@ test('a press with no terminal to be had still leaves the command on the clipboa
   expect(toasted).toContain('claude --resume older')
 })
 
-test('the mode is the last one the transcript recorded', () => {
-  const rows = [
-    JSON.stringify({ type: 'permission-mode', permissionMode: 'default', sessionId: 'a' }),
-    JSON.stringify({ type: 'user', message: { content: 'hi' } }),
-    JSON.stringify({ type: 'permission-mode', permissionMode: 'auto', sessionId: 'a' }),
-    'half a line that never finished',
-  ].join(String.fromCharCode(10))
-
-  expect(modeFromTranscript(rows)).toBe('auto')
-  expect(modeFromTranscript('nothing of the sort')).toBe(null)
-  expect(modeFromTranscript('')).toBe(null)
-})
-
-test('a tail is asked for the way the platform answers', () => {
-  expect(isWindowsPath('C:/Users/me/a.jsonl')).toBe(true)
-  expect(isWindowsPath('/home/me/a.jsonl')).toBe(false)
-  expect(tailCommand('/home/me/a.jsonl', false)).toEqual(['tail', '-n', '200', '/home/me/a.jsonl'])
-  expect(tailCommand('C:/a.jsonl', true)[0]).toBe('powershell')
-})
-
 test('a terminal is tried per platform, the window before a console', () => {
   const windows = launchCommands('abc', 'C:/repo', true)
   expect(windows[0]?.[0]).toBe('wt.exe')
@@ -507,4 +485,30 @@ test('pressing a session opens it in a new terminal', async ($, on) => {
   expect(launched?.[0]).toBe('wt.exe')
   expect(launched).toContain('claude --resume older')
   expect(copied).toBe(false)
+})
+
+test('the mode is read from the words the hint line is drawing', () => {
+  expect(modeInHint('⏵⏵ auto mode on (shift+tab to cycle)')).toBe('auto')
+  expect(modeInHint('⏸ plan mode on')).toBe('plan')
+  expect(modeInHint('⏵⏵ accept edits on')).toBe('acceptEdits')
+  expect(modeInHint('? for shortcuts')).toBe('default')
+  expect(modeInHint('')).toBe('default')
+})
+
+test('the hint line is passed through untouched while its mode is read', async ($, on) => {
+  let drawn: string | undefined
+
+  on('ui.render', { component: 'PromptHint' }, (_$, e) => {
+    drawn = (e.props as { hint?: string }).hint
+
+    return { type: 'Text', props: {}, children: [] }
+  })
+
+  await $.ui.render({
+    component: 'PromptHint',
+    surface: 'terminal',
+    props: { hint: '⏸ plan mode on', isDraft: false, isWorking: false },
+  })
+
+  expect(drawn).toBe('⏸ plan mode on')
 })

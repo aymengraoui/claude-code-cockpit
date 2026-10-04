@@ -101,37 +101,3 @@ export const toPast = (entry: Entry, title: string | null): Past => ({
 
 /** The command that returns to a session, for the clipboard. */
 export const resumeCommand = (id: string): string => `claude --resume ${id}`
-
-/** How many lines off the end of a transcript are enough to find the mode in. */
-export const TAIL_LINES = 200
-
-/** The command that reads the last lines of a file, per platform. */
-export const tailCommand = (path: string, isWindows: boolean): string[] =>
-  isWindows
-    ? ['powershell', '-NoProfile', '-Command', `Get-Content -LiteralPath '${path}' -Tail ${TAIL_LINES}`]
-    : ['tail', '-n', String(TAIL_LINES), path]
-
-/**
- * The permission mode a transcript last recorded, or null when these lines hold none.
- *
- * Claude Code writes a `permission-mode` row whenever the mode changes, so the last one
- * in the file is the mode the session is in now — the only live source of it there is.
- */
-export const modeFromTranscript = (lines: string): string | null => {
-  let mode: string | null = null
-
-  for (const line of lines.split(String.fromCharCode(10))) {
-    if (line === '' || !line.includes('permission-mode')) continue
-
-    try {
-      const row = JSON.parse(line) as Record<string, unknown>
-      if (row['type'] === 'permission-mode' && typeof row['permissionMode'] === 'string') {
-        mode = row['permissionMode']
-      }
-    } catch {
-      continue
-    }
-  }
-
-  return mode
-}
