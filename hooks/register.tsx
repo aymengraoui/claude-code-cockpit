@@ -72,6 +72,27 @@ const EMPTY: Cockpit = {
 
 const state = atom({ plugin: 'cockpit', key: 'state' } as const, EMPTY)
 
+/**
+ * The state with every field present, whatever version wrote it.
+ *
+ * `$.state` outlives a reload, so a new version reads what an older one stored — without
+ * the fields it added. Drawn as stored, the first of them (`diff`, read as undefined, not
+ * null) threw and left the pane blank. Every read goes through this, and the start of a
+ * session writes it back once.
+ */
+export const withDefaults = (stored: Partial<Cockpit> | null | undefined): Cockpit => {
+  const value = { ...EMPTY, ...(stored ?? {}) }
+
+  for (const key of Object.keys(EMPTY) as (keyof Cockpit)[]) {
+    if (value[key] === undefined) (value as Record<string, unknown>)[key] = EMPTY[key]
+  }
+  if (value.repo !== null && typeof value.repo.root !== 'string') {
+    value.repo = { ...value.repo, root: '' }
+  }
+
+  return value
+}
+
 /** Tools whose calls change files, so the path is worth marking as this session's. */
 const WRITERS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
 
@@ -220,7 +241,7 @@ const readContextRows = async ($: EngineInterface): Promise<ContextRow[]> => {
  */
 const pressAction = async ($: EngineInterface, action: string): Promise<void> => {
   if (action === 'clear') {
-    const { armed } = await read($, state)
+    const { armed } = withDefaults(await read($, state))
     const now = Date.now()
     if (armed === null || armed.action !== 'clear' || now - armed.at > ARM_MS) {
       await update($, state, prev => ({ ...prev, armed: { action: 'clear', at: now } }))
@@ -350,6 +371,7 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'cockpit', description: 'Open the cockpit pane' })
+    await update($, state, prev => withDefaults(prev))
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
@@ -524,7 +546,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Code, Text } = $.ui.resolve(e)
     const now = Date.now()
-    const it = await read($, state)
+    const it = withDefaults(await read($, state))
     const columns = Math.max(24, e.props.bodyColumns ?? 32)
     const rows = Math.max(8, e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 24)
 
@@ -654,7 +676,7 @@ export const register: Register = on => {
                 plain
                 label={it.contextRows === null ? ' ▸' : ' ▾'}
                 onPress={async () => {
-                  const isOpen = (await read($, state)).contextRows !== null
+                  const isOpen = withDefaults(await read($, state)).contextRows !== null
                   const rows = isOpen ? null : await readContextRows($)
                   await update($, state, prev => ({ ...prev, contextRows: rows }))
                 }}

@@ -9,7 +9,7 @@ import {
   toPast,
 } from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
-import { effortLabel } from './register'
+import { effortLabel, withDefaults } from './register'
 import { heatOf, TOKYO } from './lib/palette'
 import { subjectOf, todosOf } from './lib/tools'
 import {
@@ -783,4 +783,55 @@ test('quick actions run the real commands, and clear asks twice', async ($, on) 
 
   await ui.press({ key: 'action-clear' })
   expect(ran).toEqual(['rewind', 'clear'])
+})
+
+/** The state as v0.15 stored it: no diff, contextRows or armed, and a repo with no root. */
+const OLD_STATE = {
+  model: 'Opus 5.5',
+  effort: 'high',
+  mode: 'auto',
+  project: 'UltraPc',
+  cwd: 'C:/Users/UltraPc',
+  sessionId: 'current',
+  turns: 4,
+  context: 12,
+  tokens: 24000,
+  window: 200000,
+  fiveHour: { percent: 6, resetsAt: null },
+  sevenDay: null,
+  repo: { branch: 'main', ahead: 0, behind: 0, changes: [] },
+  isRepoChecked: true,
+  todos: [],
+  agents: [],
+  history: [],
+  tickedAt: null,
+}
+
+test('state stored by an older version is filled in, never drawn half-shaped', () => {
+  const it = withDefaults(OLD_STATE as never)
+
+  expect(it.diff).toBe(null)
+  expect(it.contextRows).toBe(null)
+  expect(it.armed).toBe(null)
+  expect(it.repo?.root).toBe('')
+  // What the old version did have is kept.
+  expect(it.model).toBe('Opus 5.5')
+  expect(withDefaults(null).diff).toBe(null)
+})
+
+test('a pane reloaded over an older version state still draws', async ($, on) => {
+  // What the host hands back after a reload: the value an older version stored.
+  on('state.get', () => ({ value: { value: OLD_STATE, version: 7 } }))
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  // Blank before: the drawing threw on the missing diff field.
+  expect((await ui.find({ key: 'model' }))?.text).toContain('Opus 5.5')
+  expect(await ui.find({ text: 'auto mode on' })).toBeDefined()
 })
