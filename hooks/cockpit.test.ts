@@ -44,8 +44,11 @@ const MODEL_ROW = [
     value: 'Opus 5',
     options: ['Default (recommended)', 'Opus 5', 'Sonnet 5.5', 'Haiku 4.5'],
     provider: { kind: 'core', tier: 'core' },
+    isLocked: false,
   },
 ]
+
+const LOCKED_MODEL_ROW = [{ ...MODEL_ROW[0], isLocked: true }]
 
 const USAGE = {
   startedAt: Date.now() - 600000,
@@ -613,4 +616,95 @@ test('choosing a model switches it, and a refusal says what to run instead', asy
   expect(toasts.join(' ')).toContain('Sonnet 5.5')
   // The list closes behind the choice.
   expect(await ui.find({ key: 'model-Haiku 4.5' })).toBeUndefined()
+})
+
+test("the pane shows the config row value, and marks it in the list", async ($, on) => {
+  on('clock.now', () => ({ value: Date.now() }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
+  on('command.register', () => ({ value: undefined }))
+  on('config.list', () => ({ value: MODEL_ROW }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.model', () => ({ value: 'claude-sonnet-5-5' }))
+  on('session.usage', () => ({ value: USAGE }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 128,
+      stdout: '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
+
+  await $.session.start({ source: 'startup', cwd: '/repo' })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  // The row says Opus 5 even though the resolved model is Sonnet: the menu's word wins.
+  expect((await ui.find({ key: 'model' }))?.text).toContain('Opus 5')
+
+  await ui.press({ key: 'model' })
+
+  expect(await ui.find({ text: 'Default (recommended)' })).toBeDefined()
+})
+
+test('a managed model row offers no picker and says why', async ($, on) => {
+  const toasts: string[] = []
+
+  on('clock.now', () => ({ value: Date.now() }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
+  on('command.register', () => ({ value: undefined }))
+  on('config.list', () => ({ value: LOCKED_MODEL_ROW }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.model', () => ({ value: 'claude-opus-5' }))
+  on('session.usage', () => ({ value: USAGE }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 128,
+      stdout: '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
+
+  await $.session.start({ source: 'startup', cwd: '/repo' })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  expect((await ui.find({ key: 'model' }))?.text).not.toContain('▾')
+
+  await ui.press({ key: 'model' })
+
+  expect(await ui.find({ key: 'model-Sonnet 5.5' })).toBeUndefined()
+  expect(toasts.join(' ')).toContain('managed')
 })

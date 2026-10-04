@@ -40,6 +40,8 @@ const EMPTY: Cockpit = {
   model: null,
   effort: null,
   models: [],
+  modelChoice: null,
+  isModelLocked: false,
   isPickerOpen: false,
   mode: null,
   project: null,
@@ -188,34 +190,54 @@ const openSession = async (
   $.ui.toast(copied.isCopied ? `Copied: ${command}` : `Run it yourself: ${command}`)
 }
 
-/** The models the /config menu offers, which is exactly what this account may pick. */
-const readModels = async ($: EngineInterface): Promise<string[]> => {
+/** The /config model row: the same options, value and lock the menu reads. */
+type ModelRow = { value: string | null; options: string[]; isLocked: boolean }
+
+/**
+ * The model row as `/config` has it.
+ *
+ * Its `options` are the list the model picker offers and its `value` the name they show
+ * for the current one, so the pane shows what the menu shows rather than a label of its
+ * own. A locked row is managed, and nobody may write it from here.
+ */
+const readModelRow = async ($: EngineInterface): Promise<ModelRow> => {
   try {
     const row = (await $.config.list()).find(one => one.key === 'model')
-    const options = row?.options
+    if (row === undefined) return { value: null, options: [], isLocked: false }
 
-    return options === undefined ? [] : [...options]
+    return {
+      value: typeof row.value === 'string' ? row.value : null,
+      options: row.options === undefined ? [] : [...row.options],
+      isLocked: row.isLocked,
+    }
   } catch {
-    return []
+    return { value: null, options: [], isLocked: false }
   }
 }
 
 /**
- * Switch the session's model, as choosing it in `/config` would.
+ * Switch the session's model, as choosing it in `/config` would — the same row, so the
+ * same writer runs behind it.
  *
- * The row is a managed one, so the engine may refuse a plugin's write; a refusal is
- * reported rather than swallowed, with the command that does work by hand.
+ * A refusal is reported rather than swallowed: the row is managed, and some models want
+ * consent that only `/model` can take.
  */
-const chooseModel = async ($: EngineInterface, value: string): Promise<void> => {
+const chooseModel = async ($: EngineInterface, value: string): Promise<boolean> => {
   try {
     const result = await $.config.set({ key: 'model', value })
-    $.ui.toast(
-      'deny' in result && result.deny !== undefined
-        ? `Claude Code would not switch it: ${result.deny}. Try /model ${value}`
-        : `Model set to ${value}`,
-    )
-  } catch (error) {
-    $.ui.toast(`Could not switch the model — try /model ${value}`)
+    const deny = 'deny' in result ? result.deny : undefined
+    if (deny !== undefined) {
+      $.ui.toast(`Claude Code would not switch it: ${deny} — try /model`)
+
+      return false
+    }
+    $.ui.toast(`Model set to ${value}`)
+
+    return true
+  } catch {
+    $.ui.toast(`Could not switch the model here — try /model ${value}`)
+
+    return false
   }
 }
 
@@ -307,7 +329,7 @@ export const register: Register = on => {
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
-    const [now, cwd, id, usage, model, turns, repo, storedDir, models] = await Promise.all([
+    const [now, cwd, id, usage, model, turns, repo, storedDir, modelRow] = await Promise.all([
       $.clock.now(),
       $.session.cwd().catch(() => ''),
       $.session.id().catch(() => ''),
@@ -316,7 +338,7 @@ export const register: Register = on => {
       $.session.turns().catch(() => null),
       readRepo($),
       rememberedDir($),
-      readModels($),
+      readModelRow($),
     ])
 
     const segments = toPosix(cwd).split('/').filter(one => one !== '')
@@ -327,7 +349,9 @@ export const register: Register = on => {
       cwd: cwd === '' ? null : toPosix(cwd),
       sessionId: id === '' ? null : id,
       model: model === null ? prev.model : modelLabel(model),
-      models,
+      models: modelRow.options,
+      modelChoice: modelRow.value,
+      isModelLocked: modelRow.isLocked,
       turns: turns ?? prev.turns,
       repo,
       isRepoChecked: true,
@@ -460,10 +484,11 @@ export const register: Register = on => {
 
   // The working tree is re-read between turns, not per edit: one pair of git calls a turn.
   on('turn.complete', async ($, e, next) => {
-    const [repo, turns, history] = await Promise.all([
+    const [repo, turns, history, modelRow] = await Promise.all([
       readRepo($),
       $.session.turns().catch(() => null),
       dir === '' ? Promise.resolve(null) : readSessions($, dir),
+      readModelRow($),
     ])
     await update($, state, prev => ({
       ...prev,
@@ -471,6 +496,9 @@ export const register: Register = on => {
       isRepoChecked: true,
       turns,
       history: history ?? prev.history,
+      models: modelRow.options,
+      modelChoice: modelRow.value,
+      isModelLocked: modelRow.isLocked,
     }))
 
     return next(e)
@@ -539,27 +567,50 @@ export const register: Register = on => {
           <Button
             key="model"
             plain
-            label={`${it.model ?? 'no request yet'}${it.models.length > 0 ? ' ▾' : ''}`}
-            onPress={() => update($, state, prev => ({ ...prev, isPickerOpen: !prev.isPickerOpen }))}
+            label={`${shortText(it.modelChoice ?? it.model ?? 'no request yet', Math.max(8, columns - 18))}${
+              it.models.length > 0 && !it.isModelLocked ? ' ▾' : ''
+            }`}
+            onPress={() => {
+              if (it.isModelLocked) {
+                $.ui.toast('The model is managed here and cannot be changed')
+
+                return
+              }
+
+              return update($, state, prev => ({ ...prev, isPickerOpen: !prev.isPickerOpen }))
+            }}
           />
           {it.effort !== null && <Text color={TOKYO.blue}> · {it.effort}</Text>}
           {it.mode !== null && <Text color={TOKYO.accent}> · {modeLabel(it.mode)}</Text>}
         </Box>
 
         {it.isPickerOpen && it.models.length === 0 && (
-          <Text color={TOKYO.dim}>no models offered by /config</Text>
+          <Text color={TOKYO.dim}>/config offers no model list here</Text>
         )}
         {it.isPickerOpen &&
           it.models.map(option => (
             <Box key={`model-row-${option}`}>
-              <Text color={TOKYO.dim}>{'  '}</Text>
+              <Text color={option === it.modelChoice ? TOKYO.orange : TOKYO.dim}>
+                {option === it.modelChoice ? '▸ ' : '  '}
+              </Text>
               <Button
                 key={`model-${option}`}
                 plain
-                label={option}
+                label={shortText(option, Math.max(6, columns - 3))}
                 onPress={async () => {
-                  await chooseModel($, option)
-                  await update($, state, prev => ({ ...prev, isPickerOpen: false }))
+                  const isSet = await chooseModel($, option)
+                  const row = isSet ? await readModelRow($) : null
+                  await update($, state, prev => ({
+                    ...prev,
+                    isPickerOpen: false,
+                    ...(row === null
+                      ? {}
+                      : {
+                          models: row.options,
+                          modelChoice: row.value,
+                          isModelLocked: row.isLocked,
+                        }),
+                  }))
                 }}
               />
             </Box>

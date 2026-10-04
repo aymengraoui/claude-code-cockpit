@@ -76,7 +76,7 @@ process it ever starts is `git`:
 | everything above, at launch | `$.session.usage()`, `$.session.model()` and `$.session.turns()`, asked for in `session.start` |
 | model, effort | `turn.step`, as each request goes out |
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
-| the models you may pick | `$.config.list()`, the same rows `/config` draws |
+| the models you may pick | the `/config` model row: its `options`, its `value` and its lock |
 | permission mode | the words the prompt's hint line is drawing, read as it redraws |
 | context fill, 5h and weekly windows | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
@@ -93,10 +93,14 @@ Titles are cached in `$.store`: a session's first prompt cannot change, so each 
 read at most once ever and later listings only stat the directory. The directory itself is
 cached too, so a reload lists the sessions before any prompt has been typed.
 
-**Press the model to change it.** `▾` means `/config` offered a list; pressing opens it under
-the line and choosing one calls `$.config.set`, exactly as picking it in the menu would. It is
-a managed row, so the engine may refuse a plugin's write — a refusal is reported in a toast
-with the `/model` command that does it by hand, rather than failing quietly.
+**Press the model to change it.** The list is the `/config` model row's own `options` — the
+same list the model picker offers — and the line shows that row's `value`, so the pane says
+what the menu says rather than inventing a label. Choosing one calls `$.config.set` on the
+same row, so the same writer runs behind it.
+
+A row the engine reports as `isLocked` is managed: no `▾`, no list, and a press says so. Some
+models also want a consent only `/model` can take, so a refusal is toasted with the reason and
+that command rather than failing quietly.
 
 **Press a session to open it.** The hook API exposes no way to switch sessions in place —
 `--resume` is a launch flag — so a press opens `claude --resume <id>` in a terminal of its
