@@ -8,11 +8,11 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 
 ```
 ╭─ cockpit ──────────────────────────╮
-│ Opus 5 · high                      │
+│ Opus 5 · high · plan               │
 │ ────────────────────────────────── │
 │ ctx  ▰▰▱▱▱  37%                    │
-│ 5h   ▰▱▱▱▱  12% ↻2h14              │
-│ week ▰▰▰▰▱  81% ↻4d                │
+│ 5h   ▰▱▱▱▱  12% ↻ 2h14             │
+│ week ▰▰▰▰▱  81% ↻ 4d               │
 │ cost $1.24 · 1h15m                 │
 │ ────────────────────────────────── │
 │ feat/parser ↑2                     │
@@ -24,6 +24,11 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 │ ────────────────────────────────── │
 │ AGENTS 1                           │
 │ ⟳ find every call site             │
+│ ────────────────────────────────── │
+│ SESSIONS 4                         │
+│ 2h ago   fix the parser rounding   │
+│ 1d ago   add the cockpit pane      │
+│ 4d ago   warp theme for windows    │
 │ ────────────────────────────────── │
 │ ACTIVITY                           │
 │ ✓ Edit     src/parse.ts     120ms  │
@@ -58,10 +63,17 @@ process it ever starts is `git`:
 | Shown | Where it comes from |
 | --- | --- |
 | model, effort | `turn.step`, as each request goes out |
+| permission mode | `classic.UserPromptSubmit` and `classic.PostToolUse`, the only inputs that carry it |
 | context fill, 5h and weekly windows, cost | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
 | tool activity, durations, failures | `tool.call`, timed around `next(e)` |
 | running agents | `tool.call` on the `Agent` tool |
+| earlier sessions | `$.store`, written on each session's first prompt |
+
+The session list is the mod's own record, not Claude Code's: on the first prompt of a session
+it stores that prompt as the title, and tops the entry up with the final cost at
+`session.end`. It keeps the last 20 and starts empty, so the list fills in as you work rather
+than showing anything from before the mod was installed.
 
 Two read-only `git` calls per completed turn, not per edit — the pane costs a few milliseconds
 a turn and never writes to your repo.

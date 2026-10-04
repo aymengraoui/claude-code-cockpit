@@ -67,6 +67,36 @@ export const shortText = (text: string, width: number): string => {
   return `${clean.slice(0, width - 1)}…`
 }
 
+/** `2h ago`, `4d ago`, `just now` — for timestamps in the past. */
+export const ago = (at: number, now = Date.now()): string => {
+  const minutes = Math.round((now - at) / 60000)
+  if (!Number.isFinite(minutes) || minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`
+
+  return `${Math.floor(minutes / 1440)}d ago`
+}
+
+const MODE_LABELS: Readonly<Record<string, string>> = {
+  default: 'manual',
+  acceptEdits: 'accept edits',
+  plan: 'plan',
+  auto: 'auto',
+  dontAsk: "don't ask",
+  bypassPermissions: 'bypass',
+}
+
+/** The engine's permission mode in the words the footer uses for it. */
+export const modeLabel = (mode: string): string => MODE_LABELS[mode] ?? mode
+
+/** A prompt reduced to one short line, to title a session in the history list. */
+export const titleOf = (text: string, max = 64): string => {
+  const line = text.replace(/\s+/g, ' ').trim()
+  if (line === '') return 'untitled'
+
+  return line.length <= max ? line : `${line.slice(0, max - 1)}…`
+}
+
 const MODEL_LABELS: Readonly<Record<string, string>> = {
   'claude-opus-5': 'Opus 5',
   'claude-opus-5-5': 'Opus 5.5',

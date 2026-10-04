@@ -1,15 +1,33 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Activity, Cockpit, Repo } from '../types'
-import { bar, dur, heat, modelLabel, shortPath, shortText, toPosix, until } from './lib/format'
+import type { Activity, Cockpit, Past, Repo } from '../types'
+import {
+  ago,
+  bar,
+  dur,
+  heat,
+  modelLabel,
+  modeLabel,
+  shortPath,
+  shortText,
+  titleOf,
+  toPosix,
+  until,
+} from './lib/format'
 import { parseNumstat, parseStatus, withCounts } from './lib/git'
 
 const PANE = 'cockpit'
 
+/** `$.store` key holding the session history, which outlives the session. */
+const HISTORY = 'cockpit.history'
+const HISTORY_KEPT = 20
+
 const EMPTY: Cockpit = {
   model: null,
   effort: null,
+  mode: null,
+  history: [],
   context: null,
   fiveHour: null,
   sevenDay: null,
@@ -48,6 +66,24 @@ export const subjectOf = (tool: string, input: Record<string, unknown>): string 
   return first('file_path', 'path', 'pattern', 'notebook_path')
 }
 
+/** The recorded sessions, newest first; anything unexpected in the store reads as none. */
+const readHistory = async ($: EngineInterface): Promise<Past[]> => {
+  try {
+    const stored = await $.store.get(HISTORY)
+    if (!Array.isArray(stored)) return []
+
+    return stored.filter(
+      (one): one is Past =>
+        typeof one === 'object' &&
+        one !== null &&
+        typeof (one as Past).id === 'string' &&
+        typeof (one as Past).startedAt === 'number',
+    )
+  } catch {
+    return []
+  }
+}
+
 /** Re-read the working tree: two read-only git calls, or null outside a repo. */
 const readRepo = async ($: EngineInterface): Promise<Repo | null> => {
   const run = async (argv: readonly string[]): Promise<string> => {
@@ -68,11 +104,14 @@ const readRepo = async ($: EngineInterface): Promise<Repo | null> => {
 }
 
 export const register: Register = on => {
+  /** This session's id, once a prompt has put it in the history. */
+  let recordedId: string | null = null
+
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'cockpit', description: 'Open the cockpit pane' })
 
-    const [now, repo] = await Promise.all([$.clock.now(), readRepo($)])
-    await update($, state, prev => ({ ...prev, startedAt: now, repo }))
+    const [now, repo, history] = await Promise.all([$.clock.now(), readRepo($), readHistory($)])
+    await update($, state, prev => ({ ...prev, startedAt: now, repo, history }))
 
     // Opened unasked, the pane seats itself only once the terminal is wide enough.
     void $.ui.open({ id: PANE, title: 'cockpit' })
@@ -84,6 +123,57 @@ export const register: Register = on => {
     await $.ui.open({ id: PANE, title: 'cockpit' })
 
     return { text: 'Cockpit pane opened.' }
+  })
+
+  // The permission mode reaches a mod only through the classic hook inputs, which carry
+  // it on every prompt and every tool result — so it is read, never asked for.
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
+    await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode }))
+
+    return next(e)
+  })
+
+  on('classic.PostToolUse', async ($, e, next) => {
+    const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
+    if (mode !== null) await update($, state, prev => ({ ...prev, mode }))
+
+    return next(e)
+  })
+
+  // The first prompt of a session is what titles it in the history.
+  on('prompt.submit', async ($, e, next) => {
+    if (recordedId === null) {
+      const entry: Past = {
+        id: await $.session.id(),
+        startedAt: await $.clock.now(),
+        title: titleOf(e.text),
+        costUsd: null,
+      }
+      recordedId = entry.id
+
+      const history = [entry, ...(await readHistory($)).filter(one => one.id !== entry.id)].slice(
+        0,
+        HISTORY_KEPT,
+      )
+      await $.store.set(HISTORY, history)
+      await update($, state, prev => ({ ...prev, history: history.filter(one => one.id !== entry.id) }))
+    }
+
+    return next(e)
+  })
+
+  // What the session cost is only final at the end, so the entry is topped up there.
+  on('session.end', async ($, e, next) => {
+    if (recordedId !== null) {
+      const costUsd = (await read($, state)).costUsd
+      const history = (await readHistory($)).map(one =>
+        one.id === recordedId ? { ...one, costUsd } : one,
+      )
+      await $.store.set(HISTORY, history)
+    }
+
+    return next(e)
   })
 
   // turn.step streams: the hook is a generator that passes the chunks through.
@@ -175,6 +265,7 @@ export const register: Register = on => {
             {it.model ?? 'no model yet'}
           </Text>
           {it.effort !== null && <Text color="permission"> · {it.effort}</Text>}
+          {it.mode !== null && <Text color="autoAccept"> · {modeLabel(it.mode)}</Text>}
         </Box>
 
         <Text color="subtle">{rule}</Text>
@@ -197,7 +288,7 @@ export const register: Register = on => {
             <Text color="subtle">
               {until(it.fiveHour.resetsAt, now) === null
                 ? ''
-                : ` ↻${until(it.fiveHour.resetsAt, now)}`}
+                : ` ↻ ${until(it.fiveHour.resetsAt, now)}`}
             </Text>
           </Box>
         )}
@@ -211,7 +302,7 @@ export const register: Register = on => {
             <Text color="subtle">
               {until(it.sevenDay.resetsAt, now) === null
                 ? ''
-                : ` ↻${until(it.sevenDay.resetsAt, now)}`}
+                : ` ↻ ${until(it.sevenDay.resetsAt, now)}`}
             </Text>
           </Box>
         )}
@@ -277,6 +368,24 @@ export const register: Register = on => {
                   {agent.ms === null ? '⟳ ' : '· '}
                 </Text>
                 <Text color="text">{shortText(agent.subject, Math.max(4, columns - 3))}</Text>
+              </Box>
+            ))}
+          </Box>
+        )}
+
+        {it.history.length > 0 && (
+          <Box flexDirection="column">
+            <Text color="subtle">{rule}</Text>
+            <Box>
+              <Text color="inactive" bold>
+                SESSIONS
+              </Text>
+              <Text color="subtle"> {it.history.length}</Text>
+            </Box>
+            {it.history.slice(0, 5).map(past => (
+              <Box key={`past-${past.id}`}>
+                <Text color="subtle">{ago(past.startedAt, now).padEnd(9)}</Text>
+                <Text color="text">{shortText(past.title, Math.max(6, columns - 10))}</Text>
               </Box>
             ))}
           </Box>

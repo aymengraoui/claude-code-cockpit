@@ -33,10 +33,24 @@ export type Repo = {
 /** A rate-limit window as the engine reports it. */
 export type Window = { percent: number; resetsAt: string | null }
 
+/** One earlier session, as the mod recorded it in `$.store`. */
+export type Past = {
+  id: string
+  /** Epoch ms of that session's first prompt. */
+  startedAt: number
+  /** That first prompt, in one short line. */
+  title: string
+  costUsd: number | null
+}
+
 /** Everything the pane draws, as the hooks accumulate it. */
 export type Cockpit = {
   model: string | null
   effort: string | null
+  /** Permission mode, as the classic hook inputs report it. */
+  mode: string | null
+  /** Earlier sessions, newest first; the current one is not in it. */
+  history: Past[]
   context: number | null
   fiveHour: Window | null
   sevenDay: Window | null

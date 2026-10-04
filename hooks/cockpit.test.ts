@@ -1,6 +1,17 @@
 import { expect, test } from 'claude-code/testing'
 
-import { bar, dur, heat, modelLabel, shortPath, shortText, until } from './lib/format'
+import {
+  ago,
+  bar,
+  dur,
+  heat,
+  modelLabel,
+  modeLabel,
+  shortPath,
+  shortText,
+  titleOf,
+  until,
+} from './lib/format'
 import { parseNumstat, parseStatus, withCounts } from './lib/git'
 
 const STATUS = [
@@ -172,4 +183,64 @@ test('the pane draws the branch and the working tree it read from git', async ($
   expect(await ui.find({ text: 'feat/parser' })).toBeDefined()
   expect(await ui.find({ text: 'WORKING TREE' })).toBeDefined()
   expect(await ui.find({ text: '+48' })).toBeDefined()
+})
+
+test('a past timestamp reads in the largest unit that still says something', () => {
+  const now = Date.UTC(2026, 0, 8, 12, 0, 0)
+
+  expect(ago(now - 20000, now)).toBe('just now')
+  expect(ago(now - 18 * 60000, now)).toBe('18m ago')
+  expect(ago(now - 2 * 3600000, now)).toBe('2h ago')
+  expect(ago(now - 4 * 86400000, now)).toBe('4d ago')
+})
+
+test('a permission mode reads in the words the footer uses', () => {
+  expect(modeLabel('default')).toBe('manual')
+  expect(modeLabel('acceptEdits')).toBe('accept edits')
+  expect(modeLabel('plan')).toBe('plan')
+  expect(modeLabel('bypassPermissions')).toBe('bypass')
+  expect(modeLabel('somethingNew')).toBe('somethingNew')
+})
+
+test('a prompt becomes a one-line title', () => {
+  expect(titleOf('  fix   the\nparser  ')).toBe('fix the parser')
+  expect(titleOf('', 10)).toBe('untitled')
+  expect(titleOf('a'.repeat(80), 10)).toBe(`${'a'.repeat(9)}…`)
+})
+
+test('the pane names the permission mode and lists earlier sessions', async ($, on) => {
+  const startedAt = Date.now() - 2 * 3600000
+  const past = { id: 'older', startedAt, title: 'fix the parser', costUsd: 0.4 }
+
+  on('clock.now', () => ({ value: Date.now() }))
+  on('command.register', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [past] }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 1,
+      stdout: '',
+      stderr: 'not a repository',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
+  on('classic.UserPromptSubmit', () => ({}))
+
+  await $.session.start({ source: 'startup', cwd: '/repo' })
+  await $.classic.UserPromptSubmit({ prompt: 'hello', permission_mode: 'plan' })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  expect(await ui.find({ text: 'plan' })).toBeDefined()
+  expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
+  expect(await ui.find({ text: 'fix the parser' })).toBeDefined()
+  expect(await ui.find({ text: '2h ago' })).toBeDefined()
 })
