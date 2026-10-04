@@ -15,6 +15,7 @@ import { subjectOf, todosOf } from './lib/tools'
 import {
   bar,
   kilo,
+  footerMode,
   modelLabel,
   shortPath,
   shortText,
@@ -474,24 +475,6 @@ test('pressing a session opens it in a new terminal', async ($, on) => {
   expect(copied).toBe(false)
 })
 
-test('the hint line is passed through untouched while its mode is read', async ($, on) => {
-  let drawn: string | undefined
-
-  on('ui.render', { component: 'PromptHint' }, (_$, e) => {
-    drawn = (e.props as { hint?: string }).hint
-
-    return { type: 'Text', props: {}, children: [] }
-  })
-
-  await $.ui.render({
-    component: 'PromptHint',
-    surface: 'terminal',
-    props: { hint: '⏸ plan mode on', isDraft: false, isWorking: false },
-  })
-
-  expect(drawn).toBe('⏸ plan mode on')
-})
-
 const startPane = async ($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<Parameters<typeof test>[1]>[1]) => {
   on('clock.now', () => ({ value: Date.now() }))
   on('clock.sleep', () => ({ value: undefined }))
@@ -605,103 +588,32 @@ test('a stop reports the effort, which the line then names', async ($, on) => {
   expect((await ui.find({ key: 'effort' }))?.text).toContain('High')
 })
 
-test('each tick redraws the hint line before taking the mode from it', async ($, on) => {
-  let invalidated = 0
-  let panesAsked = 0
-
-  on('clock.now', () => ({ value: Date.now() }))
-  on('clock.sleep', () => ({ value: undefined }))
-  // Open for one tick, then closed, so the ticker runs exactly once.
-  on('ui.panes', () => {
-    panesAsked += 1
-
-    return { value: panesAsked === 1 ? [{ id: 'cockpit', title: 'cockpit' }] : [] }
-  })
-  on('ui.invalidate', () => {
-    invalidated += 1
-
-    return {}
-  })
-  on('command.register', () => ({ value: undefined }))
-  on('config.list', () => ({ value: MODEL_ROW }))
-  on('ui.open', () => ({ value: { id: 'cockpit' } }))
-  on('store.get', () => ({ value: [] }))
-  on('session.cwd', () => ({ value: '/repo' }))
-  on('session.id', () => ({ value: 'current' }))
-  on('session.turns', () => ({ value: 1 }))
-  on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('session.usage', () => ({ value: USAGE }))
-  on('process.run', () => ({
-    value: {
-      exitCode: 128,
-      stdout: '',
-      stderr: '',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-    },
-  }))
-  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
-
-  await $.session.start({ source: 'startup', cwd: '/repo' })
-  // Let the detached ticker take its turn.
-  for (let i = 0; i < 20 && panesAsked < 2; i += 1) await Promise.resolve()
-  await new Promise(resolve => setTimeout(resolve, 20))
-
-  expect(invalidated).toBeGreaterThanOrEqual(1)
+test("a mode reads as the footer words it, from the engine's exact value", () => {
+  expect(footerMode('auto')).toBe('auto mode on')
+  expect(footerMode('plan')).toBe('plan mode on')
+  expect(footerMode('acceptEdits')).toBe('accept edits on')
+  expect(footerMode('default')).toBe('manual mode')
+  expect(footerMode('bypassPermissions')).toBe('bypass permissions on')
+  expect(footerMode('somethingNew')).toBe('somethingNew')
 })
 
-test('the pane shows the line under the prompt word for word', async ($, on) => {
-  let panesAsked = 0
+test('the mode a prompt reports is the mode the pane shows', async ($, on) => {
+  on('classic.UserPromptSubmit', () => ({}))
 
-  on('ui.render', { component: 'PromptHint' }, () => ({ type: 'Text', props: {}, children: [] }))
-  on('ui.panes', () => {
-    panesAsked += 1
+  const ui = await startPane($, on)
+  await $.classic.UserPromptSubmit({ prompt: 'hi', permission_mode: 'auto' })
 
-    return { value: panesAsked <= 2 ? [{ id: 'cockpit', title: 'cockpit' }] : [] }
-  })
-  on('ui.invalidate', () => ({}))
-  on('clock.now', () => ({ value: Date.now() }))
-  on('clock.sleep', () => ({ value: undefined }))
-  on('command.register', () => ({ value: undefined }))
-  on('config.list', () => ({ value: MODEL_ROW }))
-  on('ui.open', () => ({ value: { id: 'cockpit' } }))
-  on('store.get', () => ({ value: [] }))
-  on('session.cwd', () => ({ value: '/repo' }))
-  on('session.id', () => ({ value: 'current' }))
-  on('session.turns', () => ({ value: 1 }))
-  on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('session.usage', () => ({ value: USAGE }))
-  on('process.run', () => ({
-    value: {
-      exitCode: 128,
-      stdout: '',
-      stderr: '',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-    },
-  }))
-  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
+  expect(await ui.find({ text: 'auto mode on' })).toBeDefined()
+})
 
-  // What the footer draws, exactly — two mode names in it, as the real line can have.
-  const line = '⏵⏵ auto mode on (shift+tab to cycle) · plan mode next'
-  await $.ui.render({
-    component: 'PromptHint',
-    surface: 'terminal',
-    props: { hint: line, isDraft: false, isWorking: false },
-  })
+test('a later report replaces an earlier one, whichever input brings it', async ($, on) => {
+  on('classic.UserPromptSubmit', () => ({}))
+  on('classic.Stop', () => ({}))
 
-  await $.session.start({ source: 'startup', cwd: '/repo' })
-  for (let i = 0; i < 20 && panesAsked < 3; i += 1) await Promise.resolve()
-  await new Promise(resolve => setTimeout(resolve, 20))
+  const ui = await startPane($, on)
+  await $.classic.UserPromptSubmit({ prompt: 'hi', permission_mode: 'plan' })
+  await $.classic.Stop({ permission_mode: 'auto', stop_hook_active: false })
 
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: PANE_PROPS,
-  })
-
-  // No phrase picked out, no word swapped: the whole line, as drawn.
-  expect(await ui.find({ text: line })).toBeDefined()
+  expect(await ui.find({ text: 'auto mode on' })).toBeDefined()
+  expect(await ui.find({ text: 'plan mode on' })).toBeUndefined()
 })

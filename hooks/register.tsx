@@ -5,6 +5,7 @@ import type { Activity, Cockpit, Past, Repo, Todo } from '../types'
 import {
   bar,
   kilo,
+  footerMode,
   modelLabel,
   shortPath,
   shortText,
@@ -34,13 +35,11 @@ const DIR = 'cockpit.transcriptDir'
 const SESSIONS_LISTED = 8
 /** How often the pane's clocks and figures are refreshed while it is open. */
 const TICK_MS = 2000
-/** How long a redrawn hint line is given to land before its mode is taken. */
-const HINT_SETTLE_MS = 120
 
 const EMPTY: Cockpit = {
   model: null,
   effort: null,
-  modeText: null,
+  mode: null,
   project: null,
   cwd: null,
   sessionId: null,
@@ -211,16 +210,6 @@ export const effortLabel = (level: string): string =>
 /** This session's transcript, which says which platform this is. */
 let transcriptPath = ''
 
-/**
- * The line under the prompt, word for word, as the engine last drew it.
- *
- * No event reaches a plugin when the mode changes, so this line is the one live record of
- * it. It is shown exactly as drawn — no phrase picked out of it, no word swapped for
- * another — so the pane can never say something the footer does not. A `ui.render` hook
- * may not write `$.state` while drawing, so the line waits here for the tick.
- */
-let liveHint: string | null = null
-
 /** One ticker at a time, however many times the pane is opened. */
 let isTicking = false
 
@@ -247,15 +236,6 @@ const startTicking = ($: EngineInterface): void => {
         const panes = await $.ui.panes().catch(() => [])
         if (!panes.some(one => one.id === PANE)) break
 
-        // The hint line reaches its hook as last drawn, so after a shift+tab the hook
-        // still reads the line from before it: one change behind. Redrawing it here,
-        // once the new line is on screen, makes the hook read the line as it stands.
-        $.ui.invalidate('ui.render')
-        await $.clock
-          .sleep(HINT_SETTLE_MS)
-          .then(() => true)
-          .catch(() => false)
-
         const [usage, model] = await Promise.all([
           $.session.usage().catch(() => null),
           $.session.model().catch(() => null),
@@ -264,7 +244,6 @@ const startTicking = ($: EngineInterface): void => {
           ...prev,
           ...(usage === null ? {} : fromUsage(prev, usage)),
           model: model === null ? prev.model : modelLabel(model),
-          modeText: liveHint ?? prev.modeText,
           tickedAt: Date.now(),
         }))
       }
@@ -331,6 +310,10 @@ export const register: Register = on => {
   // The permission mode reaches a mod only through the classic hook inputs, which carry
   // it on every prompt and every tool result — so it is read, never asked for.
   on('classic.UserPromptSubmit', async ($, e, next) => {
+    if (typeof e.permission_mode === 'string') {
+      const mode = e.permission_mode
+      await update($, state, prev => ({ ...prev, mode }))
+    }
     if (typeof e.transcript_path === 'string' && e.transcript_path !== '') {
       transcriptPath = e.transcript_path
       const named = dirOf(e.transcript_path)
@@ -344,15 +327,17 @@ export const register: Register = on => {
   })
 
   on('classic.Stop', async ($, e, next) => {
+    const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
     const effort = typeof e.effort?.level === 'string' ? e.effort.level : null
-    if (effort !== null) await update($, state, prev => ({ ...prev, effort }))
+    await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode, effort: effort ?? prev.effort }))
 
     return next(e)
   })
 
   on('classic.PostToolUse', async ($, e, next) => {
+    const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
     const effort = typeof e.effort?.level === 'string' ? e.effort.level : null
-    if (effort !== null) await update($, state, prev => ({ ...prev, effort }))
+    await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode, effort: effort ?? prev.effort }))
 
     return next(e)
   })
@@ -369,14 +354,6 @@ export const register: Register = on => {
       const history = await readSessions($, named)
       await update($, state, prev => ({ ...prev, history }))
     }
-
-    return next(e)
-  })
-
-  // The hint line redraws the instant the mode is toggled: the only live signal there is.
-  // Nothing is changed here — the line is read, and the pane picks it up on its next tick.
-  on('ui.render', { component: 'PromptHint' }, ($, e, next) => {
-    liveHint = e.props.hint ?? null
 
     return next(e)
   })
@@ -520,9 +497,7 @@ export const register: Register = on => {
             label={`${it.effort === null ? 'effort' : effortLabel(it.effort)} ▾`}
             onPress={() => openPicker($, 'effort')}
           />
-          {it.modeText !== null && it.modeText !== '' && (
-            <Text color={TOKYO.accent}> · {it.modeText}</Text>
-          )}
+          {it.mode !== null && <Text color={TOKYO.accent}> · {footerMode(it.mode)}</Text>}
         </Box>
 
         <Text color={TOKYO.line}>{rule}</Text>

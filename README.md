@@ -77,7 +77,7 @@ process it ever starts is `git`:
 | model | `$.session.model()`, every tick |
 | effort | `turn.step`, and `effort.level` on the classic hook inputs |
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
-| permission mode | the line under the prompt, shown word for word |
+| permission mode | `permission_mode` on the prompt, tool-result and stop hook inputs |
 | context fill, 5h and weekly windows | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
 | running agents | `tool.call` on the `Agent` tool, timed around `next(e)` |
@@ -149,17 +149,16 @@ The pane ticks every two seconds while it is open: durations and resets are read
 so a tick that stamps the state is enough to move every clock, and it re-reads the usage
 figures as it goes. It stops the moment the pane is closed and never runs twice.
 
-The permission mode is the awkward one: no event reaches a plugin when it changes, in a
-local terminal session. The engine notices the change but tells only the remote bridge and
-the SDK stream. The one live record a plugin can see is the line under the prompt, so a
-`ui.render` hook on `PromptHint` keeps that line and passes it through untouched, and the
-pane shows it **word for word**. No mode is picked out of it and nothing is relabelled. That
-line can name more than one mode, and an earlier version that tried to pick the active one
-got it wrong.
+The permission mode is the awkward one. In a local terminal session no event reaches a
+plugin when it changes: the engine notices the change but tells only the remote bridge and
+the SDK stream. The mode pill in the footer (`⏵⏵ auto mode on`) is drawn as its own element,
+which is not in the text the `PromptHint` hook receives. That text is only
+`(shift+tab to cycle) · ← for agents`, so the footer cannot be read for it either.
 
-The hook is handed the line *as already drawn*, which right after a toggle is still the line
-from before it. So each tick asks for the line to be redrawn (`$.ui.invalidate`) and gives it
-a moment to land before taking it.
+What a plugin does get is the exact value, `permission_mode`, on the classic hook inputs for
+a prompt, a tool result and a turn's end. The pane shows that value in the footer's own
+words (`auto` is `auto mode on`). It is never a guess, but it moves at those moments, not on
+the keypress: a shift+tab made while the session sits idle shows with your next message.
 
 The pane is primed in `session.start`, so it is populated the moment it opens rather than
 filling in as events arrive: the engine already holds the usage figures, the model and the

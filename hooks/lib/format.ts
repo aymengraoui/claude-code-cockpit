@@ -67,6 +67,24 @@ export const kilo = (n: number): string => {
   return String(Math.round(n))
 }
 
+/**
+ * The words the footer draws for each permission mode, from the engine's own tables.
+ *
+ * This is a lookup of the engine's exact value, not a reading of the screen: `auto` is
+ * always `auto mode on`. Manual draws no pill in the footer; its own name stands in.
+ */
+const FOOTER_MODES: Readonly<Record<string, string>> = {
+  default: 'manual mode',
+  acceptEdits: 'accept edits on',
+  plan: 'plan mode on',
+  auto: 'auto mode on',
+  bypassPermissions: 'bypass permissions on',
+  dontAsk: "don't ask on",
+}
+
+/** A permission mode as the footer words it; a mode it does not know, as reported. */
+export const footerMode = (mode: string): string => FOOTER_MODES[mode] ?? mode
+
 /** A prompt reduced to one short line, to title a session in the history list. */
 export const titleOf = (text: string, max = 64): string => {
   const line = text.replace(/\s+/g, ' ').trim()
