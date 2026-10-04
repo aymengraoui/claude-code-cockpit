@@ -324,22 +324,19 @@ export const register: Register = on => {
         {it.context === null ? (
           <Text color="subtle">ctx   waiting for the first response</Text>
         ) : (
-          <Meter
-            label="ctx"
-            percent={it.context}
-            note={
+          Meter({
+            label: 'ctx',
+            percent: it.context,
+            note:
               it.tokens === null || it.window === null
                 ? undefined
-                : `${kilo(it.tokens)}/${kilo(it.window)}`
-            }
-          />
+                : `${kilo(it.tokens)}/${kilo(it.window)}`,
+          })
         )}
-        {it.fiveHour !== null && (
-          <Meter label="5h" percent={it.fiveHour.percent} resetsAt={it.fiveHour.resetsAt} />
-        )}
-        {it.sevenDay !== null && (
-          <Meter label="week" percent={it.sevenDay.percent} resetsAt={it.sevenDay.resetsAt} />
-        )}
+        {it.fiveHour !== null &&
+          Meter({ label: '5h', percent: it.fiveHour.percent, resetsAt: it.fiveHour.resetsAt })}
+        {it.sevenDay !== null &&
+          Meter({ label: 'week', percent: it.sevenDay.percent, resetsAt: it.sevenDay.resetsAt })}
         <Box>
           <Text color="inactive">{'cost'.padEnd(5)}</Text>
           <Text color="text">{it.costUsd === null ? '—' : `$${it.costUsd.toFixed(2)}`}</Text>
@@ -358,7 +355,7 @@ export const register: Register = on => {
               {it.repo.ahead > 0 && <Text color="success"> ↑{it.repo.ahead}</Text>}
               {it.repo.behind > 0 && <Text color="warning"> ↓{it.repo.behind}</Text>}
             </Box>
-            <Head title="WORKING TREE" count={changes.length} />
+            {Head({ title: "WORKING TREE", count: changes.length })}
             <Box>
               <Text color="success">+{added}</Text>
               <Text color="error"> -{removed}</Text>
@@ -386,7 +383,7 @@ export const register: Register = on => {
         {it.todos.length > 0 && (
           <Box flexDirection="column">
             <Text color="subtle">{rule}</Text>
-            <Head title="PLAN" count={`${doneCount}/${it.todos.length}`} />
+            {Head({ title: "PLAN", count: `${doneCount}/${it.todos.length}` })}
             {open.slice(0, listRoom + 1).map((todo, index) => (
               <Box key={`todo-${index}`}>
                 <Text color={todo.status === 'in_progress' ? 'claude' : 'subtle'}>
@@ -403,7 +400,7 @@ export const register: Register = on => {
         {it.agents.length > 0 && (
           <Box flexDirection="column">
             <Text color="subtle">{rule}</Text>
-            <Head title="AGENTS" count={it.agents.filter(one => one.ms === null).length} />
+            {Head({ title: "AGENTS", count: it.agents.filter(one => one.ms === null).length })}
             {it.agents.slice(-3).map(agent => (
               <Box key={`agent-${agent.id}`}>
                 <Text color={agent.ms === null ? 'claude' : 'subtle'}>
@@ -416,7 +413,7 @@ export const register: Register = on => {
         )}
 
         <Text color="subtle">{rule}</Text>
-        <Head title="ACTIVITY" count={it.activity.length} />
+        {Head({ title: "ACTIVITY", count: it.activity.length })}
         {activity.length === 0 && <Text color="subtle">nothing yet</Text>}
         {activity.slice(0, listRoom).map(call => (
           <Box key={`call-${call.id}`}>
@@ -430,7 +427,7 @@ export const register: Register = on => {
         ))}
 
         <Text color="subtle">{rule}</Text>
-        <Head title="SESSIONS" count={it.history.length} />
+        {Head({ title: "SESSIONS", count: it.history.length })}
         {it.history.length === 0 && <Text color="subtle">this is the first one recorded</Text>}
         {it.history.slice(0, 5).map(past => (
           <Box key={`past-${past.id}`}>
