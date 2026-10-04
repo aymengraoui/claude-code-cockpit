@@ -77,12 +77,16 @@ process it ever starts is `git`:
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
 | tool activity, durations, failures | `tool.call`, timed around `next(e)` |
 | running agents | `tool.call` on the `Agent` tool |
-| earlier sessions | `$.store`, written on each session's first prompt |
+| Claude Code's sessions | the transcripts in this project's transcript directory, found through the `transcript_path` the classic hook inputs carry |
 
-The session list is the mod's own record, not Claude Code's: on the first prompt of a session
-it stores that prompt as the title, and tops the entry up with the final cost at
-`session.end`. It keeps the last 20 and starts empty, so the list fills in as you work rather
-than showing anything from before the mod was installed.
+The session list is Claude Code's own, not the mod's bookkeeping. Claude Code writes one
+`<session-id>.jsonl` per session into a per-project directory, and the classic hook inputs
+carry this session's `transcript_path` — which sits in that directory, so it is never guessed.
+The eight newest are listed, each titled by the first prompt its author actually typed (meta
+rows and slash-command echoes skipped), or by its id where it holds no prompt yet.
+
+Titles are cached in `$.store`: a session's first prompt cannot change, so each transcript is
+read at most once ever and later listings only stat the directory.
 
 Two read-only `git` calls per completed turn, not per edit — the pane costs a few milliseconds
 a turn and never writes to your repo.

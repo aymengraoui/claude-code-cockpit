@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { dirOf, idOf, pickRecent, titleFromTranscript, toPast } from './lib/sessions'
 import { subjectOf, todosOf } from './lib/tools'
 import {
   ago,
@@ -223,46 +224,6 @@ test('a prompt becomes a one-line title', () => {
   expect(titleOf('a'.repeat(80), 10)).toBe(`${'a'.repeat(9)}…`)
 })
 
-test('the pane names the permission mode and lists earlier sessions', async ($, on) => {
-  const startedAt = Date.now() - 2 * 3600000
-  const past = { id: 'older', startedAt, title: 'fix the parser', costUsd: 0.4 }
-
-  on('clock.now', () => ({ value: Date.now() }))
-  on('command.register', () => ({ value: undefined }))
-  on('ui.open', () => ({ value: { id: 'cockpit' } }))
-  on('store.get', () => ({ value: [past] }))
-  on('session.turns', () => ({ value: 1 }))
-  on('session.model', () => ({ value: 'claude-opus-5' }))
-  on('session.usage', () => ({ value: USAGE }))
-  on('process.run', () => ({
-    value: {
-      exitCode: 1,
-      stdout: '',
-      stderr: 'not a repository',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-    },
-  }))
-  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
-  on('classic.UserPromptSubmit', () => ({}))
-
-  await $.session.start({ source: 'startup', cwd: '/repo' })
-  await $.classic.UserPromptSubmit({ prompt: 'hello', permission_mode: 'plan' })
-
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: PANE_PROPS,
-  })
-
-  expect(await ui.find({ text: 'plan' })).toBeDefined()
-  expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
-  expect(await ui.find({ text: 'fix the parser' })).toBeDefined()
-  expect(await ui.find({ text: '2h ago' })).toBeDefined()
-})
-
 test('token counts read at a glance', () => {
   expect(kilo(980)).toBe('980')
   expect(kilo(74000)).toBe('74k')
@@ -327,5 +288,85 @@ test('the pane is primed at launch, and says so where a section is empty', async
   expect(await ui.find({ text: '$0.12' })).toBeDefined()
   expect(await ui.find({ text: 'not a git repository' })).toBeDefined()
   expect(await ui.find({ text: 'nothing yet' })).toBeDefined()
-  expect(await ui.find({ text: 'this is the first one recorded' })).toBeDefined()
+  expect(await ui.find({ text: 'no transcripts found' })).toBeDefined()
+})
+
+const TRANSCRIPT = [
+  JSON.stringify({ type: 'mode', sessionId: 'older' }),
+  JSON.stringify({ type: 'permission-mode', permissionMode: 'default', sessionId: 'older' }),
+  JSON.stringify({ type: 'user', isMeta: true, message: { content: 'ignore me' } }),
+  JSON.stringify({ type: 'user', message: { content: '<command-name>/cockpit</command-name>' } }),
+  JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'fix the parser' }] } }),
+  JSON.stringify({ type: 'assistant', message: { content: 'on it' } }),
+  '',
+].join(String.fromCharCode(10))
+
+test('a transcript is titled by the first prompt the person actually typed', () => {
+  expect(titleFromTranscript(TRANSCRIPT)).toBe('fix the parser')
+  expect(titleFromTranscript('{"type":"user","message":{"content":"hi"}}')).toBe('hi')
+  expect(titleFromTranscript('not json at all')).toBe(null)
+  expect(titleFromTranscript('')).toBe(null)
+})
+
+test('the transcript directory and session id come off the path the engine gives', () => {
+  const sep = String.fromCharCode(92)
+  expect(dirOf(`C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}abc.jsonl`)).toBe(
+    'C:/Users/me/.claude/projects/p',
+  )
+  expect(dirOf('/home/me/.claude/projects/p/abc.jsonl')).toBe('/home/me/.claude/projects/p')
+  expect(idOf('abc-123.jsonl')).toBe('abc-123')
+})
+
+test('only transcripts are listed, newest first, empty ones left out', () => {
+  const entries = [
+    { name: 'old.jsonl', kind: 'file' as const, size: 10, mtimeMs: 1000 },
+    { name: 'new.jsonl', kind: 'file' as const, size: 10, mtimeMs: 3000 },
+    { name: 'empty.jsonl', kind: 'file' as const, size: 0, mtimeMs: 4000 },
+    { name: 'notes.md', kind: 'file' as const, size: 10, mtimeMs: 5000 },
+    { name: 'sub', kind: 'dir' as const, size: 0, mtimeMs: 6000 },
+  ]
+
+  expect(pickRecent(entries, 8).map(one => one.name)).toEqual(['new.jsonl', 'old.jsonl'])
+  expect(pickRecent(entries, 1).map(one => one.name)).toEqual(['new.jsonl'])
+})
+
+test('a transcript with no prompt is listed by its id instead', () => {
+  const entry = { name: 'abcdef1234.jsonl', kind: 'file' as const, size: 10, mtimeMs: 2000 }
+
+  expect(toPast(entry, 'fix the parser')).toEqual({
+    id: 'abcdef1234',
+    at: 2000,
+    title: 'fix the parser',
+  })
+  expect(toPast(entry, null).title).toBe('abcdef12')
+})
+
+test("the pane lists Claude Code's own sessions, read from its transcripts", async ($, on) => {
+  const sep = String.fromCharCode(92)
+  const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
+
+  on('store.get', () => ({ value: {} }))
+  on('store.set', () => ({ value: undefined }))
+  on('fs.list', () => ({
+    value: [
+      { name: 'current.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() },
+      { name: 'older.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() - 7200000 },
+    ],
+  }))
+  on('fs.read', () => ({ value: TRANSCRIPT }))
+  on('classic.SessionStart', () => ({}))
+
+  await $.classic.SessionStart({ source: 'startup', transcript_path: path })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
+  expect(await ui.find({ text: 'fix the parser' })).toBeDefined()
+  expect(await ui.find({ text: '2h ago' })).toBeDefined()
 })

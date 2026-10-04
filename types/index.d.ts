@@ -39,14 +39,14 @@ export type Todo = {
   status: 'pending' | 'in_progress' | 'completed'
 }
 
-/** One earlier session, as the mod recorded it in `$.store`. */
+/** One of Claude Code's own sessions, read from the transcript it wrote. */
 export type Past = {
+  /** The session id, which is its transcript's filename. */
   id: string
-  /** Epoch ms of that session's first prompt. */
-  startedAt: number
-  /** That first prompt, in one short line. */
+  /** Epoch ms the transcript was last written: that session's last activity. */
+  at: number
+  /** Its first typed prompt, or the id's first characters when it has none. */
   title: string
-  costUsd: number | null
 }
 
 /** Everything the pane draws, as the hooks accumulate it. */
@@ -75,7 +75,7 @@ export type Cockpit = {
   todos: Todo[]
   activity: Activity[]
   agents: Activity[]
-  /** Recorded sessions, newest first, this one included. */
+  /** Claude Code's recent sessions, newest first, this one included. */
   history: Past[]
 }
 
