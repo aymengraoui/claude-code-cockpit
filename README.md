@@ -37,10 +37,11 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 │ ✓ Bash     npm test          3.1s  │
 │ ────────────────────────────────── │
 │ SESSIONS 4                         │
-│ now       enhance the cockpit      │
-│ 2h ago    fix the parser rounding  │
-│ 1d ago    add the cockpit pane     │
-│ press a session to copy its resume │
+│ ▸ enhance the cockpit              │
+│   fix the parser rounding          │
+│   add the cockpit pane             │
+│   warp theme for windows           │
+│ press a session to open it         │
 ╰────────────────────────────────────╯
 ```
 
@@ -73,7 +74,7 @@ process it ever starts is `git`:
 | everything above, at launch | `$.session.usage()`, `$.session.model()` and `$.session.turns()`, asked for in `session.start` |
 | model, effort | `turn.step`, as each request goes out |
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
-| permission mode | `classic.UserPromptSubmit` and `classic.PostToolUse`, the only inputs that carry it |
+| permission mode | `classic.UserPromptSubmit`, `classic.Stop` and `classic.PostToolUse` carry it; between turns it is read from the transcript's own `permission-mode` rows |
 | context fill, 5h and weekly windows, cost | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
 | tool activity, durations, failures | `tool.call`, timed around `next(e)` |
@@ -90,9 +91,11 @@ Titles are cached in `$.store`: a session's first prompt cannot change, so each 
 read at most once ever and later listings only stat the directory. The directory itself is
 cached too, so a reload lists the sessions before any prompt has been typed.
 
-**Press a session to copy its resume command.** The hook API exposes no way to switch sessions
-in place — `--resume` is a launch flag — so a press puts `claude --resume <id>` on the
-clipboard and says so in a toast, ready to paste into a new terminal.
+**Press a session to open it.** The hook API exposes no way to switch sessions in place —
+`--resume` is a launch flag — so a press opens `claude --resume <id>` in a terminal of its
+own, trying Windows Terminal then a console on Windows, Terminal.app then the usual
+emulators elsewhere. Nothing about the setup is assumed: when no terminal answers, the
+command goes to the clipboard instead, so a click is never lost.
 
 Two read-only `git` calls per completed turn, not per edit — the pane costs a few milliseconds
 a turn and never writes to your repo.
@@ -118,6 +121,9 @@ Four files do the work:
 - `hooks/lib/format.ts` — bars, durations, token counts, path and model formatting
 - `hooks/lib/git.ts` — parsers for the two git commands
 - `hooks/lib/tools.ts` — readers for tool-call payloads
+- `hooks/lib/sessions.ts` — Claude Code's transcripts: titles, the mode, the tail command
+- `hooks/lib/launch.ts` — the terminal commands to try, per platform
+- `hooks/lib/palette.ts` — the colours, by value: swap this file for your own
 
 Everything outside `register.tsx` is pure functions, which is why most of the suite needs no
 engine at all.
@@ -125,9 +131,16 @@ engine at all.
 Sections that have nothing to show say so — `not a git repository`, `nothing yet` — rather
 than vanishing, so a quiet pane reads as quiet instead of broken.
 
-The pane ticks every two seconds while it is open: durations, resets and `ago` are all read at
-draw time, so a tick that stamps the state is enough to move every clock, and it re-reads the
-usage figures as it goes. It stops the moment the pane is closed and never runs twice.
+The pane ticks every two seconds while it is open: durations and resets are read at draw time,
+so a tick that stamps the state is enough to move every clock, and it re-reads the usage
+figures as it goes. It stops the moment the pane is closed and never runs twice.
+
+The permission mode is the awkward one. The hook inputs carry it on a prompt, a tool result
+and a stop, so a mode changed mid-conversation is seen at once — but one changed while the
+session sits idle would not be. Claude Code writes a `permission-mode` row to the transcript
+whenever it changes, and that is the only live record of it, so the tick tails the transcript
+to read it. A transcript runs to megabytes and `$.fs.read` has no range, so the tail is only
+taken when the file's size has moved: while nothing is happening, the poll costs one `stat`.
 
 The pane is primed in `session.start`, so it is populated the moment it opens rather than
 filling in as events arrive: the engine already holds the usage figures, the model and the

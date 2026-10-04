@@ -6,7 +6,6 @@ import {
   ago,
   bar,
   dur,
-  heat,
   kilo,
   modelLabel,
   modeLabel,
@@ -20,11 +19,15 @@ import { subjectOf, todosOf } from './lib/tools'
 import {
   dirOf,
   MAX_READ_BYTES,
+  modeFromTranscript,
   pickRecent,
   resumeCommand,
+  tailCommand,
   titleFromTranscript,
   toPast,
 } from './lib/sessions'
+import { isWindowsPath, launchCommands } from './lib/launch'
+import { heatOf, TOKYO } from './lib/palette'
 import { fromUsage } from './lib/usage'
 
 const PANE = 'cockpit'
@@ -42,6 +45,7 @@ const EMPTY: Cockpit = {
   effort: null,
   mode: null,
   project: null,
+  cwd: null,
   sessionId: null,
   turns: null,
   context: null,
@@ -156,6 +160,68 @@ const rememberedDir = async ($: EngineInterface): Promise<string> => {
   }
 }
 
+/**
+ * Open a session in a terminal of its own, falling back to the clipboard.
+ *
+ * Nothing about the person's setup is assumed: the candidates are tried in order and
+ * a click that finds no terminal still leaves them the command.
+ */
+const openSession = async (
+  $: EngineInterface,
+  id: string,
+  cwd: string,
+  surface: 'terminal' | 'desktop' | 'vscode' | 'mobile',
+): Promise<void> => {
+  const command = resumeCommand(id)
+  // The transcript's path always says which platform this is; a cwd may not be known yet.
+  const isWindows = isWindowsPath(watched.path === '' ? cwd : watched.path)
+
+  for (const argv of launchCommands(id, cwd, isWindows)) {
+    try {
+      const ran = await $.process.run(argv)
+      if (ran.exitCode === 0) {
+        $.ui.toast(`Opening ${id.slice(0, 8)} in a new terminal`)
+
+        return
+      }
+    } catch {
+      // That terminal is not on this machine; the next candidate may be.
+    }
+  }
+
+  const copied = await $.ui.copy({ text: command, surface }).catch(() => ({ isCopied: false }))
+  $.ui.toast(copied.isCopied ? `Copied: ${command}` : `Run it yourself: ${command}`)
+}
+
+/** This session's transcript, and the size it had when its tail was last read. */
+let watched = { path: '', size: -1 }
+
+/**
+ * The mode the session is in, read from the end of its own transcript.
+ *
+ * The hook inputs carry `permission_mode` only on a prompt or a tool result, so a mode
+ * changed while the session sits idle would go unnoticed until the next message. Claude
+ * Code does write a `permission-mode` row when it changes, but a transcript runs to
+ * megabytes and `$.fs.read` has no range — so the file is only tailed when its size has
+ * moved, which costs nothing at all while nothing is happening.
+ */
+const polledMode = async ($: EngineInterface): Promise<string | null> => {
+  if (watched.path === '') return null
+
+  try {
+    const { size } = await $.fs.stat(watched.path)
+    if (size === watched.size) return null
+    watched = { ...watched, size }
+
+    const tail = await $.process.run(tailCommand(watched.path, isWindowsPath(watched.path)))
+    if (tail.exitCode !== 0) return null
+
+    return modeFromTranscript(tail.stdout)
+  } catch {
+    return null
+  }
+}
+
 /** One ticker at a time, however many times the pane is opened. */
 let isTicking = false
 
@@ -183,9 +249,11 @@ const startTicking = ($: EngineInterface): void => {
         if (!panes.some(one => one.id === PANE)) break
 
         const usage = await $.session.usage().catch(() => null)
+        const mode = await polledMode($)
         await update($, state, prev => ({
           ...prev,
           ...(usage === null ? {} : fromUsage(prev, usage)),
+          mode: mode ?? prev.mode,
           tickedAt: Date.now(),
         }))
       }
@@ -221,6 +289,7 @@ export const register: Register = on => {
       ...(usage === null ? {} : fromUsage(prev, usage)),
       startedAt: usage?.startedAt ?? now,
       project: segments.at(-1) ?? null,
+      cwd: cwd === '' ? null : toPosix(cwd),
       sessionId: id === '' ? null : id,
       model: model === null ? prev.model : modelLabel(model),
       turns: turns ?? prev.turns,
@@ -254,6 +323,7 @@ export const register: Register = on => {
   on('classic.UserPromptSubmit', async ($, e, next) => {
     const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
     if (typeof e.transcript_path === 'string' && e.transcript_path !== '') {
+      watched = { path: e.transcript_path, size: -1 }
       const named = dirOf(e.transcript_path)
       if (named !== dir) {
         dir = named
@@ -261,6 +331,13 @@ export const register: Register = on => {
       }
     }
     await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode }))
+
+    return next(e)
+  })
+
+  on('classic.Stop', async ($, e, next) => {
+    const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
+    if (mode !== null) await update($, state, prev => ({ ...prev, mode }))
 
     return next(e)
   })
@@ -275,7 +352,9 @@ export const register: Register = on => {
   // The classic inputs carry this session's transcript_path, and Claude Code keeps every
   // session's transcript beside it — so the list is its sessions, not the mod's bookkeeping.
   on('classic.SessionStart', async ($, e, next) => {
-    const named = typeof e.transcript_path === 'string' ? dirOf(e.transcript_path) : ''
+    const path = typeof e.transcript_path === 'string' ? e.transcript_path : ''
+    if (path !== '') watched = { path, size: -1 }
+    const named = path === '' ? '' : dirOf(path)
     if (named !== '') {
       dir = named
       await $.store.set(DIR, named).catch(() => undefined)
@@ -370,10 +449,10 @@ export const register: Register = on => {
 
     const Head = ({ title, count }: { title: string; count?: number | string }) => (
       <Box>
-        <Text color="inactive" bold>
+        <Text color={TOKYO.dim} bold>
           {title}
         </Text>
-        {count !== undefined && <Text color="subtle"> {count}</Text>}
+        {count !== undefined && <Text color={TOKYO.dim}> {count}</Text>}
       </Box>
     )
 
@@ -392,12 +471,12 @@ export const register: Register = on => {
 
       return (
         <Box>
-          <Text color="inactive">{label.padEnd(5)}</Text>
-          <Text color={heat(percent)}>
+          <Text color={TOKYO.dim}>{label.padEnd(5)}</Text>
+          <Text color={heatOf(percent)}>
             {bar(percent)} {`${Math.round(percent)}%`.padStart(4)}
           </Text>
-          {note !== undefined && <Text color="subtle"> {note}</Text>}
-          {left !== null && <Text color="subtle"> ↻ {left}</Text>}
+          {note !== undefined && <Text color={TOKYO.dim}> {note}</Text>}
+          {left !== null && <Text color={TOKYO.dim}> ↻ {left}</Text>}
         </Box>
       )
     }
@@ -405,21 +484,21 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color="text" bold>
+          <Text color={TOKYO.text} bold>
             {it.project ?? 'claude'}
           </Text>
-          {it.turns !== null && <Text color="subtle"> · {it.turns} turns</Text>}
+          {it.turns !== null && <Text color={TOKYO.dim}> · {it.turns} turns</Text>}
         </Box>
         <Box>
-          <Text color="claude">{it.model ?? 'no request yet'}</Text>
-          {it.effort !== null && <Text color="permission"> · {it.effort}</Text>}
-          {it.mode !== null && <Text color="autoAccept"> · {modeLabel(it.mode)}</Text>}
+          <Text color={TOKYO.orange}>{it.model ?? 'no request yet'}</Text>
+          {it.effort !== null && <Text color={TOKYO.blue}> · {it.effort}</Text>}
+          {it.mode !== null && <Text color={TOKYO.accent}> · {modeLabel(it.mode)}</Text>}
         </Box>
 
-        <Text color="permission">{rule}</Text>
+        <Text color={TOKYO.line}>{rule}</Text>
 
         {it.context === null ? (
-          <Text color="subtle">ctx   waiting for the first response</Text>
+          <Text color={TOKYO.dim}>ctx   waiting for the first response</Text>
         ) : (
           Meter({
             label: 'ctx',
@@ -435,43 +514,43 @@ export const register: Register = on => {
         {it.sevenDay !== null &&
           Meter({ label: 'week', percent: it.sevenDay.percent, resetsAt: it.sevenDay.resetsAt })}
         <Box>
-          <Text color="inactive">{'cost'.padEnd(5)}</Text>
-          <Text color="text">{it.costUsd === null ? '—' : `$${it.costUsd.toFixed(2)}`}</Text>
-          {it.startedAt !== null && <Text color="subtle"> · {dur(now - it.startedAt)}</Text>}
+          <Text color={TOKYO.dim}>{'cost'.padEnd(5)}</Text>
+          <Text color={TOKYO.text}>{it.costUsd === null ? '—' : `$${it.costUsd.toFixed(2)}`}</Text>
+          {it.startedAt !== null && <Text color={TOKYO.dim}> · {dur(now - it.startedAt)}</Text>}
         </Box>
 
-        <Text color="permission">{rule}</Text>
+        <Text color={TOKYO.line}>{rule}</Text>
         {it.repo === null ? (
-          <Text color="subtle">{it.isRepoChecked ? 'not a git repository' : 'reading git…'}</Text>
+          <Text color={TOKYO.dim}>{it.isRepoChecked ? 'not a git repository' : 'reading git…'}</Text>
         ) : (
           <Box flexDirection="column">
             <Box>
-              <Text color="permission">
+              <Text color={TOKYO.blue}>
                 {shortText(it.repo.branch ?? 'detached', columns - 12)}
               </Text>
-              {it.repo.ahead > 0 && <Text color="success"> ↑{it.repo.ahead}</Text>}
-              {it.repo.behind > 0 && <Text color="warning"> ↓{it.repo.behind}</Text>}
+              {it.repo.ahead > 0 && <Text color={TOKYO.green}> ↑{it.repo.ahead}</Text>}
+              {it.repo.behind > 0 && <Text color={TOKYO.yellow}> ↓{it.repo.behind}</Text>}
             </Box>
             {Head({ title: "WORKING TREE", count: changes.length })}
             <Box>
-              <Text color="success">+{added}</Text>
-              <Text color="error"> -{removed}</Text>
-              <Text color="subtle">
+              <Text color={TOKYO.green}>+{added}</Text>
+              <Text color={TOKYO.red}> -{removed}</Text>
+              <Text color={TOKYO.dim}>
                 {' '}
                 in {changes.length} {changes.length === 1 ? 'file' : 'files'}
               </Text>
             </Box>
             {changes.slice(0, listRoom).map(change => (
               <Box key={`change-${change.path}`}>
-                <Text color={change.isMine ? 'claude' : 'subtle'}>{change.isMine ? '●' : ' '}</Text>
-                <Text color={change.status === '?' ? 'subtle' : 'warning'}>{change.status} </Text>
-                <Text color="text">
+                <Text color={change.isMine ? TOKYO.orange : TOKYO.dim}>{change.isMine ? '●' : ' '}</Text>
+                <Text color={change.status === '?' ? TOKYO.dim : TOKYO.yellow}>{change.status} </Text>
+                <Text color={TOKYO.text}>
                   {shortPath(change.path, Math.max(6, columns - 14)).padEnd(
                     Math.max(7, columns - 13),
                   )}
                 </Text>
-                <Text color="success">+{change.added}</Text>
-                <Text color="error"> -{change.removed}</Text>
+                <Text color={TOKYO.green}>+{change.added}</Text>
+                <Text color={TOKYO.red}> -{change.removed}</Text>
               </Box>
             ))}
           </Box>
@@ -479,14 +558,14 @@ export const register: Register = on => {
 
         {it.todos.length > 0 && (
           <Box flexDirection="column">
-            <Text color="permission">{rule}</Text>
+            <Text color={TOKYO.line}>{rule}</Text>
             {Head({ title: "PLAN", count: `${doneCount}/${it.todos.length}` })}
             {open.slice(0, listRoom + 1).map((todo, index) => (
               <Box key={`todo-${index}`}>
-                <Text color={todo.status === 'in_progress' ? 'claude' : 'subtle'}>
+                <Text color={todo.status === 'in_progress' ? TOKYO.orange : TOKYO.dim}>
                   {todo.status === 'in_progress' ? '▸ ' : '· '}
                 </Text>
-                <Text color={todo.status === 'in_progress' ? 'text' : 'inactive'}>
+                <Text color={todo.status === 'in_progress' ? TOKYO.text : TOKYO.dim}>
                   {shortText(todo.content, Math.max(6, columns - 3))}
                 </Text>
               </Box>
@@ -496,59 +575,51 @@ export const register: Register = on => {
 
         {it.agents.length > 0 && (
           <Box flexDirection="column">
-            <Text color="permission">{rule}</Text>
+            <Text color={TOKYO.line}>{rule}</Text>
             {Head({ title: "AGENTS", count: it.agents.filter(one => one.ms === null).length })}
             {it.agents.slice(-3).map(agent => (
               <Box key={`agent-${agent.id}`}>
-                <Text color={agent.ms === null ? 'claude' : 'subtle'}>
+                <Text color={agent.ms === null ? TOKYO.orange : TOKYO.dim}>
                   {agent.ms === null ? '⟳ ' : '· '}
                 </Text>
-                <Text color="text">{shortText(agent.subject, Math.max(4, columns - 3))}</Text>
+                <Text color={TOKYO.text}>{shortText(agent.subject, Math.max(4, columns - 3))}</Text>
               </Box>
             ))}
           </Box>
         )}
 
-        <Text color="permission">{rule}</Text>
+        <Text color={TOKYO.line}>{rule}</Text>
         {Head({ title: "ACTIVITY", count: it.activity.length })}
-        {activity.length === 0 && <Text color="subtle">nothing yet</Text>}
+        {activity.length === 0 && <Text color={TOKYO.dim}>nothing yet</Text>}
         {activity.slice(0, listRoom).map(call => (
           <Box key={`call-${call.id}`}>
-            <Text color={call.isError === null ? 'claude' : call.isError ? 'error' : 'success'}>
+            <Text color={call.isError === null ? TOKYO.orange : call.isError ? TOKYO.red : 'success'}>
               {call.isError === null ? '⟳ ' : call.isError ? '✗ ' : '✓ '}
             </Text>
-            <Text color="inactive">{call.tool.slice(0, 8).padEnd(9)}</Text>
-            <Text color="text">{shortText(call.subject, Math.max(4, columns - 18))}</Text>
-            {call.ms !== null && <Text color="subtle"> {dur(call.ms)}</Text>}
+            <Text color={TOKYO.dim}>{call.tool.slice(0, 8).padEnd(9)}</Text>
+            <Text color={TOKYO.text}>{shortText(call.subject, Math.max(4, columns - 18))}</Text>
+            {call.ms !== null && <Text color={TOKYO.dim}> {dur(call.ms)}</Text>}
           </Box>
         ))}
 
-        <Text color="permission">{rule}</Text>
+        <Text color={TOKYO.line}>{rule}</Text>
         {Head({ title: "SESSIONS", count: it.history.length })}
-        {it.history.length === 0 && <Text color="subtle">no transcripts found</Text>}
-        {it.history.slice(0, 5).map(past => (
+        {it.history.length === 0 && <Text color={TOKYO.dim}>no transcripts found</Text>}
+        {it.history.slice(0, 6).map(past => (
           <Box key={`past-row-${past.id}`}>
-            <Text color={past.id === it.sessionId ? 'claude' : 'subtle'}>
-              {(past.id === it.sessionId ? 'now' : ago(past.at, now)).padEnd(9)}
+            <Text color={past.id === it.sessionId ? TOKYO.orange : TOKYO.dim}>
+              {past.id === it.sessionId ? '▸ ' : '  '}
             </Text>
             <Button
               key={`past-${past.id}`}
               plain
-              label={shortText(past.title, Math.max(6, columns - 11))}
-              onPress={async () => {
-                const command = resumeCommand(past.id)
-                const copied = await $.ui.copy({ text: command, surface: e.surface })
-                $.ui.toast(
-                  copied.isCopied
-                    ? `Copied: ${command}`
-                    : `Run in a new terminal: ${command}`,
-                )
-              }}
+              label={shortText(past.title, Math.max(6, columns - 3))}
+              onPress={() => openSession($, past.id, it.cwd ?? '.', e.surface)}
             />
           </Box>
         ))}
         {it.history.length > 0 && (
-          <Text color="subtle">press a session to copy its resume command</Text>
+          <Text color={TOKYO.dim}>press a session to open it in a new terminal</Text>
         )}
       </Box>
     )

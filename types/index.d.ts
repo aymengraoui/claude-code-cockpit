@@ -57,6 +57,8 @@ export type Cockpit = {
   mode: string | null
   /** The directory the session runs in, by its last segment. */
   project: string | null
+  /** That directory in full: what a resumed session should open in. */
+  cwd: string | null
   /** This session's id, so the history can mark which entry is live. */
   sessionId: string | null
   /** Prompts answered so far. */

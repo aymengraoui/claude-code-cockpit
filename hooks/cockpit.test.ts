@@ -3,17 +3,20 @@ import { expect, test } from 'claude-code/testing'
 import {
   dirOf,
   idOf,
+  modeFromTranscript,
   pickRecent,
   resumeCommand,
+  tailCommand,
   titleFromTranscript,
   toPast,
 } from './lib/sessions'
+import { isWindowsPath, launchCommands } from './lib/launch'
+import { heatOf, TOKYO } from './lib/palette'
 import { subjectOf, todosOf } from './lib/tools'
 import {
   ago,
   bar,
   dur,
-  heat,
   kilo,
   modelLabel,
   modeLabel,
@@ -63,10 +66,10 @@ test('a bar fills in proportion and never overflows its width', () => {
 })
 
 test('heat stays calm until a figure is worth noticing', () => {
-  expect(heat(10)).toBe('success')
-  expect(heat(60)).toBe('claude')
-  expect(heat(80)).toBe('warning')
-  expect(heat(95)).toBe('error')
+  expect(heatOf(10)).toBe(TOKYO.green)
+  expect(heatOf(60)).toBe(TOKYO.yellow)
+  expect(heatOf(80)).toBe(TOKYO.orange)
+  expect(heatOf(95)).toBe(TOKYO.red)
 })
 
 test('a reset reads in the largest unit that still says something', () => {
@@ -379,14 +382,13 @@ test("the pane lists Claude Code's own sessions, read from its transcripts", asy
 
   expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
   expect(await ui.find({ text: 'fix the parser' })).toBeDefined()
-  expect(await ui.find({ text: '2h ago' })).toBeDefined()
 })
 
 test('a session names the command that returns to it', () => {
   expect(resumeCommand('abc-123')).toBe('claude --resume abc-123')
 })
 
-test('pressing a session copies its resume command', async ($, on) => {
+test('a press with no terminal to be had still leaves the command on the clipboard', async ($, on) => {
   const sep = String.fromCharCode(92)
   const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
   let copied: string | undefined
@@ -424,4 +426,85 @@ test('pressing a session copies its resume command', async ($, on) => {
 
   expect(copied).toBe('claude --resume older')
   expect(toasted).toContain('claude --resume older')
+})
+
+test('the mode is the last one the transcript recorded', () => {
+  const rows = [
+    JSON.stringify({ type: 'permission-mode', permissionMode: 'default', sessionId: 'a' }),
+    JSON.stringify({ type: 'user', message: { content: 'hi' } }),
+    JSON.stringify({ type: 'permission-mode', permissionMode: 'auto', sessionId: 'a' }),
+    'half a line that never finished',
+  ].join(String.fromCharCode(10))
+
+  expect(modeFromTranscript(rows)).toBe('auto')
+  expect(modeFromTranscript('nothing of the sort')).toBe(null)
+  expect(modeFromTranscript('')).toBe(null)
+})
+
+test('a tail is asked for the way the platform answers', () => {
+  expect(isWindowsPath('C:/Users/me/a.jsonl')).toBe(true)
+  expect(isWindowsPath('/home/me/a.jsonl')).toBe(false)
+  expect(tailCommand('/home/me/a.jsonl', false)).toEqual(['tail', '-n', '200', '/home/me/a.jsonl'])
+  expect(tailCommand('C:/a.jsonl', true)[0]).toBe('powershell')
+})
+
+test('a terminal is tried per platform, the window before a console', () => {
+  const windows = launchCommands('abc', 'C:/repo', true)
+  expect(windows[0]?.[0]).toBe('wt.exe')
+  expect(windows[0]).toContain('claude --resume abc')
+  expect(windows[1]?.[0]).toBe('cmd.exe')
+
+  const posix = launchCommands('abc', '/repo', false)
+  expect(posix[0]?.[0]).toBe('osascript')
+  expect(posix.map(one => one[0])).toContain('gnome-terminal')
+})
+
+test('pressing a session opens it in a new terminal', async ($, on) => {
+  const sep = String.fromCharCode(92)
+  const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
+  let launched: readonly string[] | undefined
+  let copied = false
+
+  on('store.get', () => ({ value: {} }))
+  on('store.set', () => ({ value: undefined }))
+  on('fs.list', () => ({
+    value: [{ name: 'older.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() - 7200000 }],
+  }))
+  on('fs.read', () => ({ value: TRANSCRIPT }))
+  on('classic.SessionStart', () => ({}))
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.copy', () => {
+    copied = true
+
+    return { value: { isCopied: true } }
+  })
+  on('process.run', (_$, e) => {
+    launched = e.argv
+
+    return {
+      value: {
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
+    }
+  })
+
+  await $.classic.SessionStart({ source: 'startup', transcript_path: path })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  await ui.press({ key: 'past-older' })
+
+  expect(launched?.[0]).toBe('wt.exe')
+  expect(launched).toContain('claude --resume older')
+  expect(copied).toBe(false)
 })
