@@ -9,7 +9,8 @@
 export const TOKYO = {
   text: '#c0caf5',
   dim: '#565f89',
-  line: '#7aa2f7',
+  /** The theme's own border colour (`promptBorder`): the pane's lines match Claude Code's. */
+  line: '#3b4261',
   accent: '#bb9af7',
   blue: '#7aa2f7',
   cyan: '#7dcfff',
