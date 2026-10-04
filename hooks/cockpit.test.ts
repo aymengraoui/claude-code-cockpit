@@ -721,7 +721,7 @@ test('pressing a changed file opens its diff, and back returns', async ($, on) =
   expect(await ui.find({ text: 'WORKING TREE' })).toBeDefined()
 })
 
-test('the context line opens what fills it, largest first, with compact beside it', async ($, on) => {
+test('the context line opens what fills it, largest first', async ($, on) => {
   const usage = {
     ...USAGE,
     context: {
@@ -754,7 +754,8 @@ test('the context line opens what fills it, largest first, with compact beside i
   // Deferred tools cost nothing until loaded, so they are not counted.
   expect(await ui.find({ text: 'MCP tools' })).toBeUndefined()
 
-  await ui.press({ key: 'ctx-compact' })
+  // Compacting lives in the toolbar now, one press away from the breakdown.
+  await ui.press({ key: 'action-compact' })
   expect(ran).toEqual(['compact'])
 })
 
@@ -834,4 +835,47 @@ test('a pane reloaded over an older version state still draws', async ($, on) =>
   // Blank before: the drawing threw on the missing diff field.
   expect((await ui.find({ key: 'model' }))?.text).toContain('Opus 5.5')
   expect(await ui.find({ text: 'auto mode on' })).toBeDefined()
+})
+
+/** The children of a drawn element, as `drawn()` describes them. */
+const childrenOf = (node: unknown): unknown[] =>
+  (node as { children?: unknown[] }).children ?? []
+
+test('every control sits in a toolbar pinned to the bottom of the pane', async ($, on) => {
+  const ui = await startPane($, on)
+  const root = (await ui.drawn()) as { props?: { height?: number } }
+
+  // The pane is exactly as tall as its body, so the toolbar is its last rows, not
+  // something that scrolls away with the content above it.
+  expect(root.props?.height).toBe(PANE_PROPS.scroll.bodyRows)
+
+  const [content, , pickers, actions] = childrenOf(root)
+  expect((content as { props?: { flexGrow?: number } }).props?.flexGrow).toBe(1)
+  expect(JSON.stringify(pickers)).toContain('"key":"model"')
+  expect(JSON.stringify(pickers)).toContain('"key":"effort"')
+  expect(JSON.stringify(actions)).toContain('"key":"action-compact"')
+  expect(JSON.stringify(actions)).toContain('"key":"action-clear"')
+  // And none of them is up in the content any more.
+  expect(JSON.stringify(content)).not.toContain('"key":"model"')
+  expect(JSON.stringify(content)).not.toContain('"key":"action-')
+})
+
+test('compact warns once the context is nearly full', async ($, on) => {
+  const full = { ...USAGE, context: { ...USAGE.context, percent: 91 } }
+  const { ui } = await startOutsideRepo($, on, { usage: full })
+
+  expect((await ui.find({ key: 'action-compact' }))?.text).toBe('compact ⚠')
+})
+
+test('the diff view keeps its way back at the bottom too', async ($, on) => {
+  const { ui } = await startOutsideRepo($, on)
+  await $.tool.call({
+    tool: 'Write',
+    tool_use_id: 'w1',
+    input: { file_path: 'C:/code/proj/src/parse.ts', content: 'x' },
+  })
+  await ui.press({ key: 'diff-src/parse.ts' })
+
+  const children = childrenOf(await ui.drawn())
+  expect(JSON.stringify(children.at(-1))).toContain('"key":"diff-close"')
 })

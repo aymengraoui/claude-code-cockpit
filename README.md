@@ -8,14 +8,11 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 
 ```
 ╭─ cockpit ──────────────────────────╮
-│ my-app · 7 turns                   │
-│ Opus 5.5 ▾ · High ▾ · auto mode on │
-│ compact · rewind · resume · clear  │
+│ my-app · 7 turns · auto mode on    │
 │ ────────────────────────────────── │
 │ ctx  ▰▰▱▱▱  37% 74k/200k ▾         │
 │   ▰▱▱ System tools 14k             │
 │   ▰▱▱ Messages 9k                  │
-│   compact                          │
 │ 5h   ▰▱▱▱▱  12% ↻ 2h14             │
 │ week ▰▰▰▰▱  81% ↻ 4d               │
 │ ────────────────────────────────── │
@@ -26,12 +23,13 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 │ ● M src/parse.test.ts     +31  -0  │
 │   ? notes.md               +0  -0  │
 │ ────────────────────────────────── │
-│ PLAN 2/5                           │
-│ ▸ wire the numstat parser          │
-│ ────────────────────────────────── │
 │ SESSIONS 4                         │
 │ ▸ enhance the cockpit              │
 │   fix the parser rounding          │
+│                                    │
+│ ────────────────────────────────── │
+│ Opus 5.5 ▾ · High ▾                │
+│ compact · rewind · resume · clear  │
 ╰────────────────────────────────────╯
 ```
 
@@ -109,10 +107,13 @@ is cut, and says how much was left out.
 
 **Press the `▸` beside the context bar to see what fills it** — the categories `/context`
 counts, largest first, deferred tool schemas left out since they cost nothing until loaded —
-with a `compact` button under them, which reads `compact now ←` past 85%.
+with `compact` waiting in the toolbar below.
 
-**Quick actions** sit under the model line: `compact · rewind · resume · clear`, each running
-the engine's own command. `clear` discards the conversation, so it asks twice: the first
+**Every control sits in a toolbar pinned to the bottom edge** — the model and effort pickers,
+then `compact · rewind · resume · clear` — so they never scroll away with the content above:
+the pane is drawn exactly as tall as its body, the content growing into what is left and
+clipped there. Each quick action runs the engine's own command; `compact` shows a `⚠` past
+85% context. `clear` discards the conversation, so it asks twice: the first
 press arms it and shows `clear?`, a second within four seconds runs it.
 
 **The repository follows the work.** A session started in a home directory still works in a

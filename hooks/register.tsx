@@ -560,6 +560,12 @@ export const register: Register = on => {
     const repoName = shortText(it.repo?.root.split('/').at(-1) ?? '', Math.max(6, Math.floor(columns / 2)))
     const isArmed = (action: string): boolean =>
       it.armed !== null && it.armed.action === action && now - it.armed.at <= ARM_MS
+    const actionLabel = (action: string): string => {
+      if (isArmed(action)) return `${action}?`
+      if (action === 'compact' && (it.context ?? 0) >= COMPACT_AT) return 'compact ⚠'
+
+      return action
+    }
     const added = changes.reduce((sum, one) => sum + one.added, 0)
     const removed = changes.reduce((sum, one) => sum + one.removed, 0)
 
@@ -601,31 +607,171 @@ export const register: Register = on => {
       const { path, source, format } = it.diff
 
       return (
-        <Box flexDirection="column">
-          <Box>
-            <Button
-              key="diff-close"
-              plain
-              label="← back"
-              onPress={() => update($, state, prev => ({ ...prev, diff: null }))}
-            />
-            <Text color={TOKYO.dim}> · </Text>
-            <Text color={TOKYO.text}>{shortPath(path, Math.max(8, columns - 10))}</Text>
+        <Box flexDirection="column" height={rows}>
+          <Box flexDirection="column" flexGrow={1} overflow="hidden">
+            <Text color={TOKYO.text}>{shortPath(path, Math.max(8, columns))}</Text>
+            <Text color={TOKYO.line}>{rule}</Text>
+            <Code source={source} path={path} format={format} wrap="truncate-end" />
           </Box>
           <Text color={TOKYO.line}>{rule}</Text>
-          <Code source={source} path={path} format={format} wrap="truncate-end" />
+          <Button
+            key="diff-close"
+            plain
+            label="← back"
+            onPress={() => update($, state, prev => ({ ...prev, diff: null }))}
+          />
         </Box>
       )
     }
 
     return (
-      <Box flexDirection="column">
-        <Box>
-          <Text color={TOKYO.text} bold>
-            {it.project ?? 'claude'}
-          </Text>
-          {it.turns !== null && <Text color={TOKYO.dim}> · {it.turns} turns</Text>}
+      <Box flexDirection="column" height={rows}>
+        <Box flexDirection="column" flexGrow={1} overflow="hidden">
+          <Box>
+            <Text color={TOKYO.text} bold>
+              {it.project ?? 'claude'}
+            </Text>
+            {it.turns !== null && <Text color={TOKYO.dim}> · {it.turns} turns</Text>}
+            {it.mode !== null && <Text color={TOKYO.accent}> · {footerMode(it.mode)}</Text>}
+          </Box>
+
+          <Text color={TOKYO.line}>{rule}</Text>
+
+          {it.context === null ? (
+            <Text color={TOKYO.dim}>ctx   waiting for the first response</Text>
+          ) : (
+            <Box flexDirection="column">
+              <Box>
+                {Meter({
+                  label: 'ctx',
+                  percent: it.context,
+                  note:
+                    it.tokens === null || it.window === null
+                      ? undefined
+                      : `${kilo(it.tokens)}/${kilo(it.window)}`,
+                })}
+                <Button
+                  key="ctx"
+                  plain
+                  label={it.contextRows === null ? ' ▸' : ' ▾'}
+                  onPress={async () => {
+                    const isOpen = withDefaults(await read($, state)).contextRows !== null
+                    const rows = isOpen ? null : await readContextRows($)
+                    await update($, state, prev => ({ ...prev, contextRows: rows }))
+                  }}
+                />
+              </Box>
+              {it.contextRows !== null &&
+                it.contextRows.slice(0, 8).map((row, index) => (
+                  <Box key={`ctx-row-${row.name}`}>
+                    <Text color={TOKYO.dim}>{'  '}</Text>
+                    <Text color={ROW_COLOURS[index % ROW_COLOURS.length] ?? TOKYO.blue}>
+                      {bar(it.window === null ? 0 : (row.tokens / it.window) * 100, 3)}
+                    </Text>
+                    <Text color={TOKYO.text}> {shortText(row.name, Math.max(6, columns - 14))}</Text>
+                    <Text color={TOKYO.dim}> {kilo(row.tokens)}</Text>
+                  </Box>
+                ))}
+            </Box>
+          )}
+          {it.fiveHour !== null &&
+            Meter({ label: '5h', percent: it.fiveHour.percent, resetsAt: it.fiveHour.resetsAt })}
+          {it.sevenDay !== null &&
+            Meter({ label: 'week', percent: it.sevenDay.percent, resetsAt: it.sevenDay.resetsAt })}
+          <Text color={TOKYO.line}>{rule}</Text>
+          {it.repo === null ? (
+            <Text color={TOKYO.dim}>{it.isRepoChecked ? 'not a git repository' : 'reading git…'}</Text>
+          ) : (
+            <Box flexDirection="column">
+              <Box>
+                <Text color={TOKYO.text}>{repoName}</Text>
+                <Text color={TOKYO.dim}> · </Text>
+                <Text color={TOKYO.blue}>
+                  {shortText(it.repo.branch ?? 'detached', Math.max(8, columns - repoName.length - 8))}
+                </Text>
+                {it.repo.ahead > 0 && <Text color={TOKYO.green}> ↑{it.repo.ahead}</Text>}
+                {it.repo.behind > 0 && <Text color={TOKYO.yellow}> ↓{it.repo.behind}</Text>}
+              </Box>
+              {Head({ title: "WORKING TREE", count: changes.length })}
+              <Box>
+                <Text color={TOKYO.green}>+{added}</Text>
+                <Text color={TOKYO.red}> -{removed}</Text>
+                <Text color={TOKYO.dim}>
+                  {' '}
+                  in {changes.length} {changes.length === 1 ? 'file' : 'files'}
+                </Text>
+              </Box>
+              {changes.slice(0, listRoom).map(change => (
+                <Box key={`change-${change.path}`}>
+                  <Text color={change.isMine ? TOKYO.orange : TOKYO.dim}>{change.isMine ? '●' : ' '}</Text>
+                  <Text color={change.status === '?' ? TOKYO.dim : TOKYO.yellow}>{change.status} </Text>
+                  <Button
+                    key={`diff-${change.path}`}
+                    plain
+                    label={shortPath(change.path, Math.max(6, columns - 14)).padEnd(Math.max(7, columns - 13))}
+                    onPress={() => openDiff($, it.repo?.root ?? '', change.path, change.status === '?')}
+                  />
+                  <Text color={TOKYO.green}>+{change.added}</Text>
+                  <Text color={TOKYO.red}> -{change.removed}</Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          {it.todos.length > 0 && (
+            <Box flexDirection="column">
+              <Text color={TOKYO.line}>{rule}</Text>
+              {Head({ title: "PLAN", count: `${doneCount}/${it.todos.length}` })}
+              {open.slice(0, listRoom + 1).map((todo, index) => (
+                <Box key={`todo-${index}`}>
+                  <Text color={todo.status === 'in_progress' ? TOKYO.orange : TOKYO.dim}>
+                    {todo.status === 'in_progress' ? '▸ ' : '· '}
+                  </Text>
+                  <Text color={todo.status === 'in_progress' ? TOKYO.text : TOKYO.dim}>
+                    {shortText(todo.content, Math.max(6, columns - 3))}
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          {it.agents.length > 0 && (
+            <Box flexDirection="column">
+              <Text color={TOKYO.line}>{rule}</Text>
+              {Head({ title: "AGENTS", count: it.agents.filter(one => one.ms === null).length })}
+              {it.agents.slice(-3).map(agent => (
+                <Box key={`agent-${agent.id}`}>
+                  <Text color={agent.ms === null ? TOKYO.orange : TOKYO.dim}>
+                    {agent.ms === null ? '⟳ ' : '· '}
+                  </Text>
+                  <Text color={TOKYO.text}>{shortText(agent.subject, Math.max(4, columns - 3))}</Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          <Text color={TOKYO.line}>{rule}</Text>
+          {Head({ title: "SESSIONS", count: it.history.length })}
+          {it.history.length === 0 && <Text color={TOKYO.dim}>no transcripts found</Text>}
+          {it.history.slice(0, 6).map(past => (
+            <Box key={`past-row-${past.id}`}>
+              <Text color={past.id === it.sessionId ? TOKYO.orange : TOKYO.dim}>
+                {past.id === it.sessionId ? '▸ ' : '  '}
+              </Text>
+              <Button
+                key={`past-${past.id}`}
+                plain
+                label={shortText(past.title, Math.max(6, columns - 3))}
+                onPress={() => openSession($, past.id, it.cwd ?? '.', e.surface)}
+              />
+            </Box>
+          ))}
+          {it.history.length > 0 && (
+            <Text color={TOKYO.dim}>press a session to open it in a new terminal</Text>
+          )}
         </Box>
+
+        <Text color={TOKYO.line}>{rule}</Text>
         <Box>
           <Button
             key="model"
@@ -640,7 +786,6 @@ export const register: Register = on => {
             label={`${it.effort === null ? 'effort' : effortLabel(it.effort)} ▾`}
             onPress={() => runCommand($, 'effort')}
           />
-          {it.mode !== null && <Text color={TOKYO.accent}> · {footerMode(it.mode)}</Text>}
         </Box>
         <Box>
           {QUICK_ACTIONS.map((action, index) => (
@@ -649,158 +794,12 @@ export const register: Register = on => {
               <Button
                 key={`action-${action}`}
                 plain
-                label={isArmed(action) ? `${action}?` : action}
+                label={actionLabel(action)}
                 onPress={() => pressAction($, action)}
               />
             </Box>
           ))}
         </Box>
-
-        <Text color={TOKYO.line}>{rule}</Text>
-
-        {it.context === null ? (
-          <Text color={TOKYO.dim}>ctx   waiting for the first response</Text>
-        ) : (
-          <Box flexDirection="column">
-            <Box>
-              {Meter({
-                label: 'ctx',
-                percent: it.context,
-                note:
-                  it.tokens === null || it.window === null
-                    ? undefined
-                    : `${kilo(it.tokens)}/${kilo(it.window)}`,
-              })}
-              <Button
-                key="ctx"
-                plain
-                label={it.contextRows === null ? ' ▸' : ' ▾'}
-                onPress={async () => {
-                  const isOpen = withDefaults(await read($, state)).contextRows !== null
-                  const rows = isOpen ? null : await readContextRows($)
-                  await update($, state, prev => ({ ...prev, contextRows: rows }))
-                }}
-              />
-            </Box>
-            {it.contextRows !== null &&
-              it.contextRows.slice(0, 8).map((row, index) => (
-                <Box key={`ctx-row-${row.name}`}>
-                  <Text color={TOKYO.dim}>{'  '}</Text>
-                  <Text color={ROW_COLOURS[index % ROW_COLOURS.length] ?? TOKYO.blue}>
-                    {bar(it.window === null ? 0 : (row.tokens / it.window) * 100, 3)}
-                  </Text>
-                  <Text color={TOKYO.text}> {shortText(row.name, Math.max(6, columns - 14))}</Text>
-                  <Text color={TOKYO.dim}> {kilo(row.tokens)}</Text>
-                </Box>
-              ))}
-            {it.contextRows !== null && (
-              <Box>
-                <Text color={TOKYO.dim}>{'  '}</Text>
-                <Button
-                  key="ctx-compact"
-                  plain
-                  label={it.context >= COMPACT_AT ? 'compact now ←' : 'compact'}
-                  onPress={() => pressAction($, 'compact')}
-                />
-              </Box>
-            )}
-          </Box>
-        )}
-        {it.fiveHour !== null &&
-          Meter({ label: '5h', percent: it.fiveHour.percent, resetsAt: it.fiveHour.resetsAt })}
-        {it.sevenDay !== null &&
-          Meter({ label: 'week', percent: it.sevenDay.percent, resetsAt: it.sevenDay.resetsAt })}
-        <Text color={TOKYO.line}>{rule}</Text>
-        {it.repo === null ? (
-          <Text color={TOKYO.dim}>{it.isRepoChecked ? 'not a git repository' : 'reading git…'}</Text>
-        ) : (
-          <Box flexDirection="column">
-            <Box>
-              <Text color={TOKYO.text}>{repoName}</Text>
-              <Text color={TOKYO.dim}> · </Text>
-              <Text color={TOKYO.blue}>
-                {shortText(it.repo.branch ?? 'detached', Math.max(8, columns - repoName.length - 8))}
-              </Text>
-              {it.repo.ahead > 0 && <Text color={TOKYO.green}> ↑{it.repo.ahead}</Text>}
-              {it.repo.behind > 0 && <Text color={TOKYO.yellow}> ↓{it.repo.behind}</Text>}
-            </Box>
-            {Head({ title: "WORKING TREE", count: changes.length })}
-            <Box>
-              <Text color={TOKYO.green}>+{added}</Text>
-              <Text color={TOKYO.red}> -{removed}</Text>
-              <Text color={TOKYO.dim}>
-                {' '}
-                in {changes.length} {changes.length === 1 ? 'file' : 'files'}
-              </Text>
-            </Box>
-            {changes.slice(0, listRoom).map(change => (
-              <Box key={`change-${change.path}`}>
-                <Text color={change.isMine ? TOKYO.orange : TOKYO.dim}>{change.isMine ? '●' : ' '}</Text>
-                <Text color={change.status === '?' ? TOKYO.dim : TOKYO.yellow}>{change.status} </Text>
-                <Button
-                  key={`diff-${change.path}`}
-                  plain
-                  label={shortPath(change.path, Math.max(6, columns - 14)).padEnd(Math.max(7, columns - 13))}
-                  onPress={() => openDiff($, it.repo?.root ?? '', change.path, change.status === '?')}
-                />
-                <Text color={TOKYO.green}>+{change.added}</Text>
-                <Text color={TOKYO.red}> -{change.removed}</Text>
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        {it.todos.length > 0 && (
-          <Box flexDirection="column">
-            <Text color={TOKYO.line}>{rule}</Text>
-            {Head({ title: "PLAN", count: `${doneCount}/${it.todos.length}` })}
-            {open.slice(0, listRoom + 1).map((todo, index) => (
-              <Box key={`todo-${index}`}>
-                <Text color={todo.status === 'in_progress' ? TOKYO.orange : TOKYO.dim}>
-                  {todo.status === 'in_progress' ? '▸ ' : '· '}
-                </Text>
-                <Text color={todo.status === 'in_progress' ? TOKYO.text : TOKYO.dim}>
-                  {shortText(todo.content, Math.max(6, columns - 3))}
-                </Text>
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        {it.agents.length > 0 && (
-          <Box flexDirection="column">
-            <Text color={TOKYO.line}>{rule}</Text>
-            {Head({ title: "AGENTS", count: it.agents.filter(one => one.ms === null).length })}
-            {it.agents.slice(-3).map(agent => (
-              <Box key={`agent-${agent.id}`}>
-                <Text color={agent.ms === null ? TOKYO.orange : TOKYO.dim}>
-                  {agent.ms === null ? '⟳ ' : '· '}
-                </Text>
-                <Text color={TOKYO.text}>{shortText(agent.subject, Math.max(4, columns - 3))}</Text>
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        <Text color={TOKYO.line}>{rule}</Text>
-        {Head({ title: "SESSIONS", count: it.history.length })}
-        {it.history.length === 0 && <Text color={TOKYO.dim}>no transcripts found</Text>}
-        {it.history.slice(0, 6).map(past => (
-          <Box key={`past-row-${past.id}`}>
-            <Text color={past.id === it.sessionId ? TOKYO.orange : TOKYO.dim}>
-              {past.id === it.sessionId ? '▸ ' : '  '}
-            </Text>
-            <Button
-              key={`past-${past.id}`}
-              plain
-              label={shortText(past.title, Math.max(6, columns - 3))}
-              onPress={() => openSession($, past.id, it.cwd ?? '.', e.surface)}
-            />
-          </Box>
-        ))}
-        {it.history.length > 0 && (
-          <Text color={TOKYO.dim}>press a session to open it in a new terminal</Text>
-        )}
       </Box>
     )
   })
