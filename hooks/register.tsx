@@ -6,7 +6,6 @@ import {
   bar,
   kilo,
   modelLabel,
-  modeLabel,
   shortPath,
   shortText,
   toPosix,
@@ -41,7 +40,7 @@ const HINT_SETTLE_MS = 120
 const EMPTY: Cockpit = {
   model: null,
   effort: null,
-  mode: null,
+  modeText: null,
   project: null,
   cwd: null,
   sessionId: null,
@@ -213,41 +212,14 @@ export const effortLabel = (level: string): string =>
 let transcriptPath = ''
 
 /**
- * The permission mode, as the footer last drew it.
+ * The line under the prompt, word for word, as the engine last drew it.
  *
- * No event fires when the mode is toggled, and the transcript only records it at a turn
- * boundary, so the one live source is the hint line under the prompt. Its hook is handed
- * the line as already drawn, which after a toggle is the line from before it — so the tick
- * redraws the line, and the hook reads it again as it now stands. A `ui.render` hook may
- * not write `$.state` while drawing, so the mode is kept here for the tick to pass on.
+ * No event reaches a plugin when the mode changes, so this line is the one live record of
+ * it. It is shown exactly as drawn — no phrase picked out of it, no word swapped for
+ * another — so the pane can never say something the footer does not. A `ui.render` hook
+ * may not write `$.state` while drawing, so the line waits here for the tick.
  */
-let liveMode: string | null = null
-
-/**
- * The engine's own indicator for each mode, which is what the footer draws.
- *
- * From its mode table: `manual mode`, `plan mode`, `accept edits`, `bypass permissions`,
- * `don't ask`, `auto mode`. The permission dialog says "auto mode on" instead — a
- * different component, and not what the hint line carries.
- *
- * Longest first, so `manual mode` is never taken for `auto mode`.
- */
-const MODE_INDICATORS: ReadonlyArray<readonly [string, string]> = [
-  ['bypass permissions', 'bypassPermissions'],
-  ['accept edits', 'acceptEdits'],
-  ['manual mode', 'default'],
-  ['plan mode', 'plan'],
-  ['auto mode', 'auto'],
-  ["don't ask", 'dontAsk'],
-]
-
-/** The mode a hint line names, or null when it names none of them. */
-export const modeInHint = (hint: string): string | null => {
-  const line = hint.toLowerCase()
-  for (const [indicator, mode] of MODE_INDICATORS) if (line.includes(indicator)) return mode
-
-  return null
-}
+let liveHint: string | null = null
 
 /** One ticker at a time, however many times the pane is opened. */
 let isTicking = false
@@ -292,7 +264,7 @@ const startTicking = ($: EngineInterface): void => {
           ...prev,
           ...(usage === null ? {} : fromUsage(prev, usage)),
           model: model === null ? prev.model : modelLabel(model),
-          mode: liveMode ?? prev.mode,
+          modeText: liveHint ?? prev.modeText,
           tickedAt: Date.now(),
         }))
       }
@@ -359,7 +331,6 @@ export const register: Register = on => {
   // The permission mode reaches a mod only through the classic hook inputs, which carry
   // it on every prompt and every tool result — so it is read, never asked for.
   on('classic.UserPromptSubmit', async ($, e, next) => {
-    const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
     if (typeof e.transcript_path === 'string' && e.transcript_path !== '') {
       transcriptPath = e.transcript_path
       const named = dirOf(e.transcript_path)
@@ -368,23 +339,20 @@ export const register: Register = on => {
         await $.store.set(DIR, named).catch(() => undefined)
       }
     }
-    await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode }))
 
     return next(e)
   })
 
   on('classic.Stop', async ($, e, next) => {
-    const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
     const effort = typeof e.effort?.level === 'string' ? e.effort.level : null
-    await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode, effort: effort ?? prev.effort }))
+    if (effort !== null) await update($, state, prev => ({ ...prev, effort }))
 
     return next(e)
   })
 
   on('classic.PostToolUse', async ($, e, next) => {
-    const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
     const effort = typeof e.effort?.level === 'string' ? e.effort.level : null
-    await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode, effort: effort ?? prev.effort }))
+    if (effort !== null) await update($, state, prev => ({ ...prev, effort }))
 
     return next(e)
   })
@@ -408,8 +376,7 @@ export const register: Register = on => {
   // The hint line redraws the instant the mode is toggled: the only live signal there is.
   // Nothing is changed here — the line is read, and the pane picks it up on its next tick.
   on('ui.render', { component: 'PromptHint' }, ($, e, next) => {
-    const named = modeInHint(e.props.hint ?? '')
-    if (named !== null) liveMode = named
+    liveHint = e.props.hint ?? null
 
     return next(e)
   })
@@ -553,7 +520,9 @@ export const register: Register = on => {
             label={`${it.effort === null ? 'effort' : effortLabel(it.effort)} ▾`}
             onPress={() => openPicker($, 'effort')}
           />
-          {it.mode !== null && <Text color={TOKYO.accent}> · {modeLabel(it.mode)}</Text>}
+          {it.modeText !== null && it.modeText !== '' && (
+            <Text color={TOKYO.accent}> · {it.modeText}</Text>
+          )}
         </Box>
 
         <Text color={TOKYO.line}>{rule}</Text>

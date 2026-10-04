@@ -9,14 +9,13 @@ import {
   toPast,
 } from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
-import { effortLabel, modeInHint } from './register'
+import { effortLabel } from './register'
 import { heatOf, TOKYO } from './lib/palette'
 import { subjectOf, todosOf } from './lib/tools'
 import {
   bar,
   kilo,
   modelLabel,
-  modeLabel,
   shortPath,
   shortText,
   titleOf,
@@ -215,14 +214,6 @@ test('the pane draws the branch and the working tree it read from git', async ($
   expect(await ui.find({ text: 'feat/parser' })).toBeDefined()
   expect(await ui.find({ text: 'WORKING TREE' })).toBeDefined()
   expect(await ui.find({ text: '+48' })).toBeDefined()
-})
-
-test('a permission mode reads in the words the footer uses', () => {
-  expect(modeLabel('default')).toBe('manual')
-  expect(modeLabel('acceptEdits')).toBe('accept edits')
-  expect(modeLabel('plan')).toBe('plan')
-  expect(modeLabel('bypassPermissions')).toBe('bypass')
-  expect(modeLabel('somethingNew')).toBe('somethingNew')
 })
 
 test('a prompt becomes a one-line title', () => {
@@ -483,24 +474,6 @@ test('pressing a session opens it in a new terminal', async ($, on) => {
   expect(copied).toBe(false)
 })
 
-test("the mode is read from the engine's own indicator, not the dialog's wording", () => {
-  // The indicators come from the engine's mode table; the footer draws these exactly.
-  expect(modeInHint('⏵⏵ auto mode')).toBe('auto')
-  expect(modeInHint('auto mode · ? for shortcuts')).toBe('auto')
-  expect(modeInHint('⏸ plan mode')).toBe('plan')
-  expect(modeInHint('⏵⏵ accept edits')).toBe('acceptEdits')
-  expect(modeInHint('manual mode')).toBe('default')
-  expect(modeInHint('bypass permissions')).toBe('bypassPermissions')
-  expect(modeInHint("don't ask")).toBe('dontAsk')
-
-  // "manual mode" must not be read as "auto mode", whatever the order of the table.
-  expect(modeInHint('manual mode · esc to interrupt')).toBe('default')
-
-  // A line that names no mode leaves the last known one standing.
-  expect(modeInHint('? for shortcuts')).toBe(null)
-  expect(modeInHint('')).toBe(null)
-})
-
 test('the hint line is passed through untouched while its mode is read', async ($, on) => {
   let drawn: string | undefined
 
@@ -675,4 +648,60 @@ test('each tick redraws the hint line before taking the mode from it', async ($,
   await new Promise(resolve => setTimeout(resolve, 20))
 
   expect(invalidated).toBeGreaterThanOrEqual(1)
+})
+
+test('the pane shows the line under the prompt word for word', async ($, on) => {
+  let panesAsked = 0
+
+  on('ui.render', { component: 'PromptHint' }, () => ({ type: 'Text', props: {}, children: [] }))
+  on('ui.panes', () => {
+    panesAsked += 1
+
+    return { value: panesAsked <= 2 ? [{ id: 'cockpit', title: 'cockpit' }] : [] }
+  })
+  on('ui.invalidate', () => ({}))
+  on('clock.now', () => ({ value: Date.now() }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('command.register', () => ({ value: undefined }))
+  on('config.list', () => ({ value: MODEL_ROW }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: USAGE }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 128,
+      stdout: '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
+
+  // What the footer draws, exactly — two mode names in it, as the real line can have.
+  const line = '⏵⏵ auto mode on (shift+tab to cycle) · plan mode next'
+  await $.ui.render({
+    component: 'PromptHint',
+    surface: 'terminal',
+    props: { hint: line, isDraft: false, isWorking: false },
+  })
+
+  await $.session.start({ source: 'startup', cwd: '/repo' })
+  for (let i = 0; i < 20 && panesAsked < 3; i += 1) await Promise.resolve()
+  await new Promise(resolve => setTimeout(resolve, 20))
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  // No phrase picked out, no word swapped: the whole line, as drawn.
+  expect(await ui.find({ text: line })).toBeDefined()
 })

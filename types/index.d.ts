@@ -53,8 +53,8 @@ export type Past = {
 export type Cockpit = {
   model: string | null
   effort: string | null
-  /** Permission mode, as the classic hook inputs report it. */
-  mode: string | null
+  /** The line under the prompt, word for word, as the engine last drew it. */
+  modeText: string | null
   /** The directory the session runs in, by its last segment. */
   project: string | null
   /** That directory in full: what a resumed session should open in. */

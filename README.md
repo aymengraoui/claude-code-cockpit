@@ -77,7 +77,7 @@ process it ever starts is `git`:
 | model | `$.session.model()`, every tick |
 | effort | `turn.step`, and `effort.level` on the classic hook inputs |
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
-| permission mode | the words the prompt's hint line is drawing, read as it redraws |
+| permission mode | the line under the prompt, shown word for word |
 | context fill, 5h and weekly windows | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
 | running agents | `tool.call` on the `Agent` tool, timed around `next(e)` |
@@ -149,22 +149,17 @@ The pane ticks every two seconds while it is open: durations and resets are read
 so a tick that stamps the state is enough to move every clock, and it re-reads the usage
 figures as it goes. It stops the moment the pane is closed and never runs twice.
 
-The permission mode is the awkward one. No event fires when it is toggled, and the transcript
-records it only at a turn boundary, so neither a hook input nor a file sees a shift+tab while
-the session sits idle. What does see it is the hint line under the prompt: it redraws that
-instant. So a `ui.render` hook on `PromptHint` reads the mode out of the line and passes it
-through untouched. A render hook may not write `$.state`, so the mode is held in a module
-variable and the pane picks it up on its next tick.
+The permission mode is the awkward one: no event reaches a plugin when it changes, in a
+local terminal session. The engine notices the change but tells only the remote bridge and
+the SDK stream. The one live record a plugin can see is the line under the prompt, so a
+`ui.render` hook on `PromptHint` keeps that line and passes it through untouched, and the
+pane shows it **word for word**. No mode is picked out of it and nothing is relabelled. That
+line can name more than one mode, and an earlier version that tried to pick the active one
+got it wrong.
 
-One catch: the hook is handed the line *as already drawn*, which right after a toggle is
-still the line from before it — read naively, the pane runs one change behind. So each tick
-asks for the hint line to be redrawn (`$.ui.invalidate`) and gives it a moment to land; the
-hook then reads the line as it now stands, and the tick takes the mode from that.
-
-The words matched are the engine's own indicators — `manual mode`, `plan mode`,
-`accept edits`, `bypass permissions`, `don't ask`, `auto mode` — not the permission
-dialog's `auto mode on`, which is a different component. A line naming no mode leaves the
-last known one standing rather than reading as `default`.
+The hook is handed the line *as already drawn*, which right after a toggle is still the line
+from before it. So each tick asks for the line to be redrawn (`$.ui.invalidate`) and gives it
+a moment to land before taking it.
 
 The pane is primed in `session.start`, so it is populated the moment it opens rather than
 filling in as events arrive: the engine already holds the usage figures, the model and the

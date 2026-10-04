@@ -67,18 +67,6 @@ export const kilo = (n: number): string => {
   return String(Math.round(n))
 }
 
-const MODE_LABELS: Readonly<Record<string, string>> = {
-  default: 'manual',
-  acceptEdits: 'accept edits',
-  plan: 'plan',
-  auto: 'auto',
-  dontAsk: "don't ask",
-  bypassPermissions: 'bypass',
-}
-
-/** The engine's permission mode in the words the footer uses for it. */
-export const modeLabel = (mode: string): string => MODE_LABELS[mode] ?? mode
-
 /** A prompt reduced to one short line, to title a session in the history list. */
 export const titleOf = (text: string, max = 64): string => {
   const line = text.replace(/\s+/g, ' ').trim()
