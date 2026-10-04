@@ -9,13 +9,17 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 ```
 ╭─ cockpit ──────────────────────────╮
 │ my-app · 7 turns                   │
-│ Opus 5.5 ▾ · High ▾ · plan         │
+│ Opus 5.5 ▾ · High ▾ · auto mode on │
+│ compact · rewind · resume · clear  │
 │ ────────────────────────────────── │
-│ ctx  ▰▰▱▱▱  37% 74k/200k           │
+│ ctx  ▰▰▱▱▱  37% 74k/200k ▾         │
+│   ▰▱▱ System tools 14k             │
+│   ▰▱▱ Messages 9k                  │
+│   compact                          │
 │ 5h   ▰▱▱▱▱  12% ↻ 2h14             │
 │ week ▰▰▰▰▱  81% ↻ 4d               │
 │ ────────────────────────────────── │
-│ feat/parser ↑2                     │
+│ my-app · feat/parser ↑2            │
 │ WORKING TREE 3                     │
 │ +169 -12 in 3 files                │
 │ ● M src/parse.ts          +48 -12  │
@@ -24,18 +28,10 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 │ ────────────────────────────────── │
 │ PLAN 2/5                           │
 │ ▸ wire the numstat parser          │
-│ · show the plan in the pane        │
-│ · cover it with a test             │
-│ ────────────────────────────────── │
-│ AGENTS 1                           │
-│ ⟳ find every call site             │
 │ ────────────────────────────────── │
 │ SESSIONS 4                         │
 │ ▸ enhance the cockpit              │
 │   fix the parser rounding          │
-│   add the cockpit pane             │
-│   warp theme for windows           │
-│ press a session to open it         │
 ╰────────────────────────────────────╯
 ```
 
@@ -79,7 +75,9 @@ process it ever starts is `git`:
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
 | permission mode | `permission_mode` on the prompt, tool-result and stop hook inputs |
 | context fill, 5h and weekly windows | `session.measure` |
+| the repository | the session's directory when it is one; otherwise the one the session last wrote a file in |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
+| what fills the context | `$.session.usage({ breakdown: 'summary' })`, the categories `/context` counts |
 | running agents | `tool.call` on the `Agent` tool, timed around `next(e)` |
 | Claude Code's sessions | the transcripts in this project's transcript directory, found through the `transcript_path` the classic hook inputs carry |
 
@@ -104,6 +102,22 @@ The model line names the running model, as `/model` does (`Opus 5.5`), read from
 `$.session.model()` on every tick so a switch shows at once. Effort has no setting to read,
 so it arrives with each request and with the classic hook inputs, which carry
 `effort.level` — a change made with `/effort` shows at the next tool call or turn end.
+
+**Press a changed file to see its diff.** The diff against `HEAD` takes the pane, drawn as a
+diff, with `← back` to return; an untracked file is shown as it stands. Past 1,500 lines it
+is cut, and says how much was left out.
+
+**Press the `▸` beside the context bar to see what fills it** — the categories `/context`
+counts, largest first, deferred tool schemas left out since they cost nothing until loaded —
+with a `compact` button under them, which reads `compact now ←` past 85%.
+
+**Quick actions** sit under the model line: `compact · rewind · resume · clear`, each running
+the engine's own command. `clear` discards the conversation, so it asks twice: the first
+press arms it and shows `clear?`, a second within four seconds runs it.
+
+**The repository follows the work.** A session started in a home directory still works in a
+repository, so when the session's own directory is not one, the pane follows the repository
+of the last file the session wrote, and remembers it for the next launch.
 
 **Press a session to open it.** The hook API exposes no way to switch sessions in place —
 `--resume` is a launch flag — so a press opens `claude --resume <id>` in a terminal of its

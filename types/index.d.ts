@@ -24,6 +24,8 @@ export type Change = {
 
 /** What `git status --porcelain=v2 --branch` says about where HEAD is. */
 export type Repo = {
+  /** The repository's top directory, POSIX-spelled. */
+  root: string
   branch: string | null
   ahead: number
   behind: number
@@ -32,6 +34,17 @@ export type Repo = {
 
 /** A rate-limit window as the engine reports it. */
 export type Window = { percent: number; resetsAt: string | null }
+
+/** One file's diff, open in the pane in place of the overview. */
+export type OpenDiff = {
+  path: string
+  /** Unified diff text, or the file itself when git has no diff for it. */
+  source: string
+  format: 'diff' | 'source'
+}
+
+/** One row of the context breakdown, as /context counts it. */
+export type ContextRow = { name: string; tokens: number }
 
 /** One item of the plan, as the `TodoWrite` tool last wrote it. */
 export type Todo = {
@@ -78,6 +91,12 @@ export type Cockpit = {
   history: Past[]
   /** When the live ticker last looked; a redraw of the clocks hangs off it. */
   tickedAt: number | null
+  /** A file's diff, when one is open. */
+  diff: OpenDiff | null
+  /** The context breakdown, when it is open; null while closed. */
+  contextRows: ContextRow[] | null
+  /** An action pressed once that wants a second press, and when: /clear. */
+  armed: { action: string; at: number } | null
 }
 
 declare module 'claude-code' {

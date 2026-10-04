@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Activity, Cockpit, Past, Repo, Todo } from '../types'
+import type { Activity, Cockpit, ContextRow, OpenDiff, Past, Repo, Todo } from '../types'
 import {
   bar,
   kilo,
@@ -12,7 +12,7 @@ import {
   toPosix,
   until,
 } from './lib/format'
-import { parseNumstat, parseStatus, withCounts } from './lib/git'
+import { capDiff, parseNumstat, parseStatus, relativeTo, withCounts } from './lib/git'
 import { subjectOf, todosOf } from './lib/tools'
 import {
   dirOf,
@@ -33,6 +33,16 @@ const TITLES = 'cockpit.titles'
 /** `$.store` key holding the transcript directory, so a reload knows it before any prompt. */
 const DIR = 'cockpit.transcriptDir'
 const SESSIONS_LISTED = 8
+/** `$.store` key holding the repository last worked in, for a launch outside any repo. */
+const REPO = 'cockpit.repoDir'
+/** How long a press that wants confirming stays armed. */
+const ARM_MS = 4000
+/** The quick actions, each the engine's own command; the one that discards comes last. */
+const QUICK_ACTIONS = ['compact', 'rewind', 'resume', 'clear'] as const
+/** Context fill at which compacting is offered as the thing to do next. */
+const COMPACT_AT = 85
+/** Colours the context breakdown's rows take in turn. */
+const ROW_COLOURS = [TOKYO.blue, TOKYO.accent, TOKYO.cyan, TOKYO.green, TOKYO.yellow, TOKYO.orange]
 /** How often the pane's clocks and figures are refreshed while it is open. */
 const TICK_MS = 2000
 
@@ -55,6 +65,9 @@ const EMPTY: Cockpit = {
   agents: [],
   history: [],
   tickedAt: null,
+  diff: null,
+  contextRows: null,
+  armed: null,
 }
 
 const state = atom({ plugin: 'cockpit', key: 'state' } as const, EMPTY)
@@ -123,23 +136,101 @@ const readSessions = async ($: EngineInterface, dir: string): Promise<Past[]> =>
   return recent.map(entry => toPast(entry, titles[entry.name.replace(/\.jsonl$/, '')] ?? null))
 }
 
-/** Re-read the working tree: two read-only git calls, or null outside a repo. */
-const readRepo = async ($: EngineInterface): Promise<Repo | null> => {
-  const run = async (argv: readonly string[]): Promise<string> => {
-    try {
-      const result = await $.process.run(argv)
+/** Runs git, answering its output on success and '' on anything else. */
+const runGit = async ($: EngineInterface, argv: readonly string[], ok = [0]): Promise<string> => {
+  try {
+    const result = await $.process.run(['git', ...argv])
 
-      return result.exitCode === 0 ? result.stdout : ''
-    } catch {
-      return ''
+    return ok.includes(result.exitCode) ? result.stdout : ''
+  } catch {
+    return ''
+  }
+}
+
+/** The repository a directory sits in, POSIX-spelled; '' outside one. */
+const rootOf = async ($: EngineInterface, dir: string): Promise<string> =>
+  dir === '' ? '' : toPosix((await runGit($, ['-C', dir, 'rev-parse', '--show-toplevel'])).trim())
+
+/**
+ * The repository the pane shows. The session's directory when it is one; otherwise the
+ * one the session last wrote a file in — a session started in a home directory still
+ * works in a repository, and that is the one worth showing.
+ */
+let repoDir = ''
+
+/** Re-read the working tree: two read-only git calls, or null with no repository. */
+const readRepo = async ($: EngineInterface): Promise<Repo | null> => {
+  if (repoDir === '') return null
+
+  const status = await runGit($, ['-C', repoDir, 'status', '--porcelain=v2', '--branch'])
+  if (status === '') return null
+  const numstat = await runGit($, ['-C', repoDir, 'diff', 'HEAD', '--numstat'])
+
+  return {
+    ...withCounts(parseStatus(status), parseNumstat(numstat), relativeTo(repoDir, mine)),
+    root: repoDir,
+  }
+}
+
+/**
+ * Point the pane at the repository a written file sits in, when it is a different one.
+ * Remembered, so the next launch outside any repository opens on it.
+ */
+const followRepo = async ($: EngineInterface, file: string): Promise<void> => {
+  const root = await rootOf($, file.split('/').slice(0, -1).join('/'))
+  if (root === '' || root === repoDir) return
+
+  repoDir = root
+  await $.store.set(REPO, root).catch(() => undefined)
+  const repo = await readRepo($)
+  await update($, state, prev => ({ ...prev, repo, isRepoChecked: true }))
+}
+
+/** A file's diff against HEAD; an untracked file is shown as it stands. */
+const openDiff = async ($: EngineInterface, root: string, path: string, isUntracked: boolean): Promise<void> => {
+  let diff: OpenDiff
+  if (isUntracked) {
+    const text = await $.fs.read(`${root}/${path}`).catch(() => '')
+    diff = { path, source: capDiff(text === '' ? '(empty, or unreadable)' : text), format: 'source' }
+  } else {
+    const text = await runGit($, ['-C', root, 'diff', 'HEAD', '--', path])
+    diff = { path, source: capDiff(text === '' ? '(no changes against HEAD)' : text), format: 'diff' }
+  }
+  await update($, state, prev => ({ ...prev, diff }))
+}
+
+/** What fills the context, as /context counts it; a deferred row costs nothing yet. */
+const readContextRows = async ($: EngineInterface): Promise<ContextRow[]> => {
+  try {
+    const usage = await $.session.usage({ breakdown: 'summary' })
+    const categories = usage.context.breakdown?.categories ?? []
+
+    return categories
+      .filter(one => !one.isDeferred && one.tokens > 0)
+      .map(one => ({ name: one.name, tokens: one.tokens }))
+      .sort((a, b) => b.tokens - a.tokens)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * A press of a quick action. /clear discards the conversation, so it asks twice: the
+ * first press arms it and says so, a second within a few seconds runs it.
+ */
+const pressAction = async ($: EngineInterface, action: string): Promise<void> => {
+  if (action === 'clear') {
+    const { armed } = await read($, state)
+    const now = Date.now()
+    if (armed === null || armed.action !== 'clear' || now - armed.at > ARM_MS) {
+      await update($, state, prev => ({ ...prev, armed: { action: 'clear', at: now } }))
+      $.ui.toast('Press clear again to discard this conversation')
+
+      return
     }
   }
-
-  const status = await run(['git', 'status', '--porcelain=v2', '--branch'])
-  if (status === '') return null
-  const numstat = await run(['git', 'diff', 'HEAD', '--numstat'])
-
-  return withCounts(parseStatus(status), parseNumstat(numstat), mine)
+  await update($, state, prev => ({ ...prev, armed: null }))
+  await runCommand($, action)
 }
 
 /** The transcript directory, from the store when a classic hook has not named it yet. */
@@ -187,19 +278,19 @@ const openSession = async (
 }
 
 /**
- * Open one of the engine's own pickers — `/model`, `/effort` — by running its command.
+ * Run one of the engine's own commands — `/model`, `/effort`, `/compact` — as typed.
  *
  * What they offer depends on the account and the model (plan-gated models, the effort
  * levels a model takes), and none of it is exposed to a plugin, so no copy of a list here
  * could be exact. Running the command is: the same list, the same switching. A run that
  * cannot happen rejects, and the command is left in the prompt box, one Enter away.
  */
-const openPicker = async ($: EngineInterface, command: 'model' | 'effort'): Promise<void> => {
+const runCommand = async ($: EngineInterface, command: string): Promise<void> => {
   try {
     await $.command.run({ command })
   } catch {
     const filled = await $.prompt.fill({ text: `/${command}` }).catch(() => ({ isFilled: false }))
-    $.ui.toast(filled.isFilled ? `Press Enter to choose the ${command}` : `Run /${command}`)
+    $.ui.toast(filled.isFilled ? `Press Enter to run /${command}` : `Run /${command}`)
   }
 }
 
@@ -262,16 +353,19 @@ export const register: Register = on => {
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
-    const [now, cwd, id, usage, model, turns, repo, storedDir] = await Promise.all([
+    const [now, cwd, id, usage, model, turns, storedDir, storedRepo] = await Promise.all([
       $.clock.now(),
       $.session.cwd().catch(() => ''),
       $.session.id().catch(() => ''),
       $.session.usage().catch(() => null),
       $.session.model().catch(() => null),
       $.session.turns().catch(() => null),
-      readRepo($),
       rememberedDir($),
+      $.store.get(REPO).catch(() => null),
     ])
+
+    repoDir = (await rootOf($, cwd)) || (typeof storedRepo === 'string' ? storedRepo : '')
+    const repo = await readRepo($)
 
     const segments = toPosix(cwd).split('/').filter(one => one !== '')
     await update($, state, prev => ({
@@ -390,7 +484,10 @@ export const register: Register = on => {
       ...(isAgent ? { agents: [...prev.agents, entry].slice(-AGENTS_KEPT) } : {}),
     }))
 
-    if (WRITERS.has(e.tool) && subject !== '') mine.add(toPosix(subject))
+    if (WRITERS.has(e.tool) && subject !== '') {
+      mine.add(toPosix(subject))
+      await followRepo($, toPosix(subject))
+    }
 
     const startedAt = await $.clock.now()
     const result = await next(e)
@@ -425,7 +522,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const { Box, Button, Code, Text } = $.ui.resolve(e)
     const now = Date.now()
     const it = await read($, state)
     const columns = Math.max(24, e.props.bodyColumns ?? 32)
@@ -438,6 +535,9 @@ export const register: Register = on => {
     // The lists share what is left under the fixed rows; each keeps at least two.
     const listRoom = Math.max(3, Math.floor((rows - 18) / 2))
     const rule = '─'.repeat(columns)
+    const repoName = shortText(it.repo?.root.split('/').at(-1) ?? '', Math.max(6, Math.floor(columns / 2)))
+    const isArmed = (action: string): boolean =>
+      it.armed !== null && it.armed.action === action && now - it.armed.at <= ARM_MS
     const added = changes.reduce((sum, one) => sum + one.added, 0)
     const removed = changes.reduce((sum, one) => sum + one.removed, 0)
 
@@ -475,6 +575,27 @@ export const register: Register = on => {
       )
     }
 
+    if (it.diff !== null) {
+      const { path, source, format } = it.diff
+
+      return (
+        <Box flexDirection="column">
+          <Box>
+            <Button
+              key="diff-close"
+              plain
+              label="← back"
+              onPress={() => update($, state, prev => ({ ...prev, diff: null }))}
+            />
+            <Text color={TOKYO.dim}> · </Text>
+            <Text color={TOKYO.text}>{shortPath(path, Math.max(8, columns - 10))}</Text>
+          </Box>
+          <Text color={TOKYO.line}>{rule}</Text>
+          <Code source={source} path={path} format={format} wrap="truncate-end" />
+        </Box>
+      )
+    }
+
     return (
       <Box flexDirection="column">
         <Box>
@@ -488,16 +609,29 @@ export const register: Register = on => {
             key="model"
             plain
             label={`${it.model ?? 'model'} ▾`}
-            onPress={() => openPicker($, 'model')}
+            onPress={() => runCommand($, 'model')}
           />
           <Text color={TOKYO.dim}> · </Text>
           <Button
             key="effort"
             plain
             label={`${it.effort === null ? 'effort' : effortLabel(it.effort)} ▾`}
-            onPress={() => openPicker($, 'effort')}
+            onPress={() => runCommand($, 'effort')}
           />
           {it.mode !== null && <Text color={TOKYO.accent}> · {footerMode(it.mode)}</Text>}
+        </Box>
+        <Box>
+          {QUICK_ACTIONS.map((action, index) => (
+            <Box key={`action-row-${action}`}>
+              {index > 0 && <Text color={TOKYO.dim}> · </Text>}
+              <Button
+                key={`action-${action}`}
+                plain
+                label={isArmed(action) ? `${action}?` : action}
+                onPress={() => pressAction($, action)}
+              />
+            </Box>
+          ))}
         </Box>
 
         <Text color={TOKYO.line}>{rule}</Text>
@@ -505,14 +639,50 @@ export const register: Register = on => {
         {it.context === null ? (
           <Text color={TOKYO.dim}>ctx   waiting for the first response</Text>
         ) : (
-          Meter({
-            label: 'ctx',
-            percent: it.context,
-            note:
-              it.tokens === null || it.window === null
-                ? undefined
-                : `${kilo(it.tokens)}/${kilo(it.window)}`,
-          })
+          <Box flexDirection="column">
+            <Box>
+              {Meter({
+                label: 'ctx',
+                percent: it.context,
+                note:
+                  it.tokens === null || it.window === null
+                    ? undefined
+                    : `${kilo(it.tokens)}/${kilo(it.window)}`,
+              })}
+              <Button
+                key="ctx"
+                plain
+                label={it.contextRows === null ? ' ▸' : ' ▾'}
+                onPress={async () => {
+                  const isOpen = (await read($, state)).contextRows !== null
+                  const rows = isOpen ? null : await readContextRows($)
+                  await update($, state, prev => ({ ...prev, contextRows: rows }))
+                }}
+              />
+            </Box>
+            {it.contextRows !== null &&
+              it.contextRows.slice(0, 8).map((row, index) => (
+                <Box key={`ctx-row-${row.name}`}>
+                  <Text color={TOKYO.dim}>{'  '}</Text>
+                  <Text color={ROW_COLOURS[index % ROW_COLOURS.length] ?? TOKYO.blue}>
+                    {bar(it.window === null ? 0 : (row.tokens / it.window) * 100, 3)}
+                  </Text>
+                  <Text color={TOKYO.text}> {shortText(row.name, Math.max(6, columns - 14))}</Text>
+                  <Text color={TOKYO.dim}> {kilo(row.tokens)}</Text>
+                </Box>
+              ))}
+            {it.contextRows !== null && (
+              <Box>
+                <Text color={TOKYO.dim}>{'  '}</Text>
+                <Button
+                  key="ctx-compact"
+                  plain
+                  label={it.context >= COMPACT_AT ? 'compact now ←' : 'compact'}
+                  onPress={() => pressAction($, 'compact')}
+                />
+              </Box>
+            )}
+          </Box>
         )}
         {it.fiveHour !== null &&
           Meter({ label: '5h', percent: it.fiveHour.percent, resetsAt: it.fiveHour.resetsAt })}
@@ -524,8 +694,10 @@ export const register: Register = on => {
         ) : (
           <Box flexDirection="column">
             <Box>
+              <Text color={TOKYO.text}>{repoName}</Text>
+              <Text color={TOKYO.dim}> · </Text>
               <Text color={TOKYO.blue}>
-                {shortText(it.repo.branch ?? 'detached', columns - 12)}
+                {shortText(it.repo.branch ?? 'detached', Math.max(8, columns - repoName.length - 8))}
               </Text>
               {it.repo.ahead > 0 && <Text color={TOKYO.green}> ↑{it.repo.ahead}</Text>}
               {it.repo.behind > 0 && <Text color={TOKYO.yellow}> ↓{it.repo.behind}</Text>}
@@ -543,11 +715,12 @@ export const register: Register = on => {
               <Box key={`change-${change.path}`}>
                 <Text color={change.isMine ? TOKYO.orange : TOKYO.dim}>{change.isMine ? '●' : ' '}</Text>
                 <Text color={change.status === '?' ? TOKYO.dim : TOKYO.yellow}>{change.status} </Text>
-                <Text color={TOKYO.text}>
-                  {shortPath(change.path, Math.max(6, columns - 14)).padEnd(
-                    Math.max(7, columns - 13),
-                  )}
-                </Text>
+                <Button
+                  key={`diff-${change.path}`}
+                  plain
+                  label={shortPath(change.path, Math.max(6, columns - 14)).padEnd(Math.max(7, columns - 13))}
+                  onPress={() => openDiff($, it.repo?.root ?? '', change.path, change.status === '?')}
+                />
                 <Text color={TOKYO.green}>+{change.added}</Text>
                 <Text color={TOKYO.red}> -{change.removed}</Text>
               </Box>

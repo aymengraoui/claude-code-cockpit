@@ -22,7 +22,7 @@ import {
   titleOf,
   until,
 } from './lib/format'
-import { parseNumstat, parseStatus, withCounts } from './lib/git'
+import { capDiff, parseNumstat, parseStatus, relativeTo, withCounts } from './lib/git'
 
 const STATUS = [
   '# branch.oid 0bd1c4f',
@@ -193,7 +193,7 @@ test('the pane draws the branch and the working tree it read from git', async ($
   on('process.run', (_$, e) => ({
     value: {
       exitCode: 0,
-      stdout: e.argv.includes('status') ? STATUS : NUMSTAT,
+      stdout: e.argv.includes('rev-parse') ? '/repo' : e.argv.includes('status') ? STATUS : NUMSTAT,
       stderr: '',
       isStdoutTruncated: false,
       isStderrTruncated: false,
@@ -616,4 +616,171 @@ test('a later report replaces an earlier one, whichever input brings it', async 
 
   expect(await ui.find({ text: 'auto mode on' })).toBeDefined()
   expect(await ui.find({ text: 'plan mode on' })).toBeUndefined()
+})
+
+test('a written path is matched to git by its place in the repository', () => {
+  const inside = relativeTo('C:/code/proj', [
+    'C:/code/proj/src/parse.ts',
+    'c:/code/proj/README.md',
+    'C:/code/other/x.ts',
+    'C:/code/project-two/y.ts',
+  ])
+
+  expect([...inside].sort()).toEqual(['README.md', 'src/parse.ts'])
+})
+
+test('a long diff is cut, and says how much was left out', () => {
+  const lines = Array.from({ length: 10 }, (_, i) => `+line ${i}`).join(String.fromCharCode(10))
+  const cut = capDiff(lines, 4).split(String.fromCharCode(10))
+
+  expect(cut.length).toBe(5)
+  expect(cut[4]).toBe('… 6 more lines')
+  expect(capDiff('short', 4)).toBe('short')
+})
+
+/** A session launched outside any repository, whose work happens in C:/code/proj. */
+const startOutsideRepo = async (
+  $: Parameters<Parameters<typeof test>[1]>[0],
+  on: Parameters<Parameters<typeof test>[1]>[1],
+  extra: { usage?: unknown } = {},
+) => {
+  const ran: string[][] = []
+  on('clock.now', () => ({ value: Date.now() }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
+  on('command.register', () => ({ value: undefined }))
+  on('config.list', () => ({ value: MODEL_ROW }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: null }))
+  on('store.set', () => ({ value: undefined }))
+  on('session.cwd', () => ({ value: 'C:/Users/me' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: extra.usage ?? USAGE }))
+  on('process.run', (_$, e) => {
+    ran.push([...e.argv])
+    const dir = e.argv[2] ?? ''
+    const isProj = dir.toLowerCase().startsWith('c:/code/proj')
+    const out = (stdout: string, exitCode = 0) => ({
+      value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+    })
+    if (!isProj) return out('', 128)
+    if (e.argv.includes('rev-parse')) return out('C:/code/proj')
+    if (e.argv.includes('status')) return out(STATUS)
+    if (e.argv.includes('--numstat')) return out(NUMSTAT)
+
+    return out('@@ -1 +1 @@' + String.fromCharCode(10) + '-old' + String.fromCharCode(10) + '+new')
+  })
+  on('session.start', () => ({ sessionId: 'current', cwd: 'C:/Users/me' }))
+  on('tool.call', () => ({ result: {}, text: 'ok', isError: false }))
+
+  await $.session.start({ source: 'startup', cwd: 'C:/Users/me' })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  return { ui, ran }
+}
+
+test('launched outside a repository, the pane follows the repository the work is in', async ($, on) => {
+  const { ui } = await startOutsideRepo($, on)
+  expect(await ui.find({ text: 'not a git repository' })).toBeDefined()
+
+  await $.tool.call({
+    tool: 'Write',
+    tool_use_id: 'w1',
+    input: { file_path: 'C:/code/proj/src/parse.ts', content: 'x' },
+  })
+
+  expect(await ui.find({ text: 'proj' })).toBeDefined()
+  expect(await ui.find({ text: 'feat/parser' })).toBeDefined()
+  // Written this session, and now recognised as such: the dot never lit before.
+  expect(await ui.find({ text: '●' })).toBeDefined()
+})
+
+test('pressing a changed file opens its diff, and back returns', async ($, on) => {
+  const { ui } = await startOutsideRepo($, on)
+  await $.tool.call({
+    tool: 'Write',
+    tool_use_id: 'w1',
+    input: { file_path: 'C:/code/proj/src/parse.ts', content: 'x' },
+  })
+
+  await ui.press({ key: 'diff-src/parse.ts' })
+  expect((await ui.find({ type: 'Code' }))?.text).toContain('+new')
+  expect(await ui.find({ key: 'diff-close' })).toBeDefined()
+
+  await ui.press({ key: 'diff-close' })
+  expect(await ui.find({ type: 'Code' })).toBeUndefined()
+  expect(await ui.find({ text: 'WORKING TREE' })).toBeDefined()
+})
+
+test('the context line opens what fills it, largest first, with compact beside it', async ($, on) => {
+  const usage = {
+    ...USAGE,
+    context: {
+      ...USAGE.context,
+      breakdown: {
+        categories: [
+          { name: 'Messages', tokens: 9000, color: 'claude', isDeferred: false },
+          { name: 'System tools', tokens: 14000, color: 'claude', isDeferred: false },
+          { name: 'MCP tools', tokens: 30000, color: 'claude', isDeferred: true },
+        ],
+        totalTokens: 23000,
+        maxTokens: 200000,
+        rawMaxTokens: 200000,
+        percentage: 12,
+      },
+    },
+  }
+  const ran: string[] = []
+  on('command.run', (_$, e) => {
+    ran.push(e.command)
+
+    return { text: '' }
+  })
+  const { ui } = await startOutsideRepo($, on, { usage })
+
+  await ui.press({ key: 'ctx' })
+
+  expect(await ui.find({ text: 'System tools' })).toBeDefined()
+  expect(await ui.find({ text: 'Messages' })).toBeDefined()
+  // Deferred tools cost nothing until loaded, so they are not counted.
+  expect(await ui.find({ text: 'MCP tools' })).toBeUndefined()
+
+  await ui.press({ key: 'ctx-compact' })
+  expect(ran).toEqual(['compact'])
+})
+
+test('quick actions run the real commands, and clear asks twice', async ($, on) => {
+  const ran: string[] = []
+  const toasts: string[] = []
+  on('command.run', (_$, e) => {
+    ran.push(e.command)
+
+    return { text: '' }
+  })
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
+  const { ui } = await startOutsideRepo($, on)
+
+  await ui.press({ key: 'action-rewind' })
+  expect(ran).toEqual(['rewind'])
+
+  await ui.press({ key: 'action-clear' })
+  expect(ran).toEqual(['rewind'])
+  expect(toasts.join(' ')).toContain('again')
+  expect((await ui.find({ key: 'action-clear' }))?.text).toBe('clear?')
+
+  await ui.press({ key: 'action-clear' })
+  expect(ran).toEqual(['rewind', 'clear'])
 })

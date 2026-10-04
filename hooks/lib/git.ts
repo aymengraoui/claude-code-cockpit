@@ -19,7 +19,7 @@ const letterOf = (xy: string): string => {
  * should degrade, never fail.
  */
 export const parseStatus = (stdout: string): Repo => {
-  const repo: Repo = { branch: null, ahead: 0, behind: 0, changes: [] }
+  const repo: Repo = { root: '', branch: null, ahead: 0, behind: 0, changes: [] }
 
   for (const line of stdout.split('\n')) {
     if (line === '') continue
@@ -88,7 +88,24 @@ export const parseNumstat = (stdout: string): Map<string, { added: number; remov
   return counts
 }
 
-/** The paths this session wrote to, folded into the working-tree list. */
+/**
+ * Absolute paths as paths inside `root`, the way git names them; those outside it dropped.
+ *
+ * Tool calls write absolute paths and git reports repo-relative ones, so the two never
+ * matched and no file was ever marked as this session's. Compared without case, since a
+ * Windows drive letter is spelled either way.
+ */
+export const relativeTo = (root: string, paths: Iterable<string>): Set<string> => {
+  const base = `${root.replace(/\/+$/, '').toLowerCase()}/`
+  const inside = new Set<string>()
+  for (const path of paths) {
+    if (path.toLowerCase().startsWith(base)) inside.add(path.slice(base.length))
+  }
+
+  return inside
+}
+
+/** The paths this session wrote to, folded into the working-tree list; `mine` repo-relative. */
 export const withCounts = (
   repo: Repo,
   counts: Map<string, { added: number; removed: number }>,
@@ -108,4 +125,15 @@ export const withCounts = (
   })
 
   return { ...repo, changes }
+}
+
+/** Lines of a diff the pane will hold: past this, the rest is cut and said to be. */
+export const DIFF_LINES = 1500
+
+/** A diff cut to `DIFF_LINES`, with a last line saying how much was left out. */
+export const capDiff = (diff: string, limit = DIFF_LINES): string => {
+  const lines = diff.split(String.fromCharCode(10))
+  if (lines.length <= limit) return diff
+
+  return [...lines.slice(0, limit), `… ${lines.length - limit} more lines`].join(String.fromCharCode(10))
 }
