@@ -152,9 +152,14 @@ figures as it goes. It stops the moment the pane is closed and never runs twice.
 The permission mode is the awkward one. No event fires when it is toggled, and the transcript
 records it only at a turn boundary, so neither a hook input nor a file sees a shift+tab while
 the session sits idle. What does see it is the hint line under the prompt: it redraws that
-instant. So a `ui.render` hook on `PromptHint` reads the mode out of the words it is drawing
-and passes the line through untouched. A render hook may not write `$.state`, so the mode is
-held in a module variable and the pane picks it up on its next tick.
+instant. So a `ui.render` hook on `PromptHint` reads the mode out of the line and passes it
+through untouched. A render hook may not write `$.state`, so the mode is held in a module
+variable and the pane picks it up on its next tick.
+
+One catch: the hook is handed the line *as already drawn*, which right after a toggle is
+still the line from before it — read naively, the pane runs one change behind. So each tick
+asks for the hint line to be redrawn (`$.ui.invalidate`) and gives it a moment to land; the
+hook then reads the line as it now stands, and the tick takes the mode from that.
 
 The words matched are the engine's own indicators — `manual mode`, `plan mode`,
 `accept edits`, `bypass permissions`, `don't ask`, `auto mode` — not the permission

@@ -631,3 +631,48 @@ test('a stop reports the effort, which the line then names', async ($, on) => {
 
   expect((await ui.find({ key: 'effort' }))?.text).toContain('High')
 })
+
+test('each tick redraws the hint line before taking the mode from it', async ($, on) => {
+  let invalidated = 0
+  let panesAsked = 0
+
+  on('clock.now', () => ({ value: Date.now() }))
+  on('clock.sleep', () => ({ value: undefined }))
+  // Open for one tick, then closed, so the ticker runs exactly once.
+  on('ui.panes', () => {
+    panesAsked += 1
+
+    return { value: panesAsked === 1 ? [{ id: 'cockpit', title: 'cockpit' }] : [] }
+  })
+  on('ui.invalidate', () => {
+    invalidated += 1
+
+    return {}
+  })
+  on('command.register', () => ({ value: undefined }))
+  on('config.list', () => ({ value: MODEL_ROW }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: USAGE }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 128,
+      stdout: '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
+
+  await $.session.start({ source: 'startup', cwd: '/repo' })
+  // Let the detached ticker take its turn.
+  for (let i = 0; i < 20 && panesAsked < 2; i += 1) await Promise.resolve()
+  await new Promise(resolve => setTimeout(resolve, 20))
+
+  expect(invalidated).toBeGreaterThanOrEqual(1)
+})

@@ -35,6 +35,8 @@ const DIR = 'cockpit.transcriptDir'
 const SESSIONS_LISTED = 8
 /** How often the pane's clocks and figures are refreshed while it is open. */
 const TICK_MS = 2000
+/** How long a redrawn hint line is given to land before its mode is taken. */
+const HINT_SETTLE_MS = 120
 
 const EMPTY: Cockpit = {
   model: null,
@@ -211,12 +213,13 @@ export const effortLabel = (level: string): string =>
 let transcriptPath = ''
 
 /**
- * The permission mode, as the footer is drawing it this instant.
+ * The permission mode, as the footer last drew it.
  *
  * No event fires when the mode is toggled, and the transcript only records it at a turn
- * boundary, so the one live source is the hint line under the prompt: it redraws the moment
- * shift+tab is pressed. A `ui.render` hook may not write `$.state` while drawing, so the
- * mode is kept here and the pane reads it on its next tick.
+ * boundary, so the one live source is the hint line under the prompt. Its hook is handed
+ * the line as already drawn, which after a toggle is the line from before it — so the tick
+ * redraws the line, and the hook reads it again as it now stands. A `ui.render` hook may
+ * not write `$.state` while drawing, so the mode is kept here for the tick to pass on.
  */
 let liveMode: string | null = null
 
@@ -271,6 +274,15 @@ const startTicking = ($: EngineInterface): void => {
 
         const panes = await $.ui.panes().catch(() => [])
         if (!panes.some(one => one.id === PANE)) break
+
+        // The hint line reaches its hook as last drawn, so after a shift+tab the hook
+        // still reads the line from before it: one change behind. Redrawing it here,
+        // once the new line is on screen, makes the hook read the line as it stands.
+        $.ui.invalidate('ui.render')
+        await $.clock
+          .sleep(HINT_SETTLE_MS)
+          .then(() => true)
+          .catch(() => false)
 
         const [usage, model] = await Promise.all([
           $.session.usage().catch(() => null),
