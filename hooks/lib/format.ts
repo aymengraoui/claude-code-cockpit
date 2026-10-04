@@ -87,6 +87,23 @@ export const titleOf = (text: string, max = 64): string => {
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`
 }
 
+/**
+ * What each alias the /config model row offers resolves to: the model picker's main
+ * section, as this build's registry lists it. The row offers `opus`, `sonnet`, `haiku`,
+ * and a bare `opus` does not say whether it means 5 or 5.5 — this does. It tracks the
+ * Claude lineup, so it wants a line changed when a new model ships.
+ */
+const ALIAS_LABELS: Readonly<Record<string, string>> = {
+  opus: 'Opus 5.5',
+  sonnet: 'Sonnet 5.5',
+  haiku: 'Haiku 4.5',
+  fable: 'Fable 5.1',
+  default: 'Default (recommended)',
+}
+
+/** An option of the model row as the picker should show it: the model and its version. */
+export const optionLabel = (option: string): string => ALIAS_LABELS[option.toLowerCase()] ?? option
+
 const MODEL_LABELS: Readonly<Record<string, string>> = {
   'claude-opus-5': 'Opus 5',
   'claude-opus-5-5': 'Opus 5.5',

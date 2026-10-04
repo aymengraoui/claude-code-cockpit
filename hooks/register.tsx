@@ -6,6 +6,7 @@ import {
   bar,
   kilo,
   modelLabel,
+  optionLabel,
   modeLabel,
   shortPath,
   shortText,
@@ -222,7 +223,7 @@ const readModelRow = async ($: EngineInterface): Promise<ModelRow> => {
  * A refusal is reported rather than swallowed: the row is managed, and some models want
  * consent that only `/model` can take.
  */
-const chooseModel = async ($: EngineInterface, value: string): Promise<boolean> => {
+const chooseModel = async ($: EngineInterface, value: string, label: string): Promise<boolean> => {
   try {
     const result = await $.config.set({ key: 'model', value })
     const deny = 'deny' in result ? result.deny : undefined
@@ -231,7 +232,7 @@ const chooseModel = async ($: EngineInterface, value: string): Promise<boolean> 
 
       return false
     }
-    $.ui.toast(`Model set to ${value}`)
+    $.ui.toast(`Model set to ${label}`)
 
     return true
   } catch {
@@ -518,6 +519,8 @@ export const register: Register = on => {
     // The lists share what is left under the fixed rows; each keeps at least two.
     const listRoom = Math.max(3, Math.floor((rows - 18) / 2))
     const rule = '─'.repeat(columns)
+    const isCurrent = (option: string): boolean =>
+      option === it.modelChoice || optionLabel(option) === it.modelChoice
     const added = changes.reduce((sum, one) => sum + one.added, 0)
     const removed = changes.reduce((sum, one) => sum + one.removed, 0)
 
@@ -590,15 +593,15 @@ export const register: Register = on => {
         {it.isPickerOpen &&
           it.models.map(option => (
             <Box key={`model-row-${option}`}>
-              <Text color={option === it.modelChoice ? TOKYO.orange : TOKYO.dim}>
-                {option === it.modelChoice ? '▸ ' : '  '}
+              <Text color={isCurrent(option) ? TOKYO.orange : TOKYO.dim}>
+                {isCurrent(option) ? '▸ ' : '  '}
               </Text>
               <Button
                 key={`model-${option}`}
                 plain
-                label={shortText(option, Math.max(6, columns - 3))}
+                label={optionLabel(option)}
                 onPress={async () => {
-                  const isSet = await chooseModel($, option)
+                  const isSet = await chooseModel($, option, optionLabel(option))
                   const row = isSet ? await readModelRow($) : null
                   await update($, state, prev => ({
                     ...prev,

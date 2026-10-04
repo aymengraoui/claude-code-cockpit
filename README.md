@@ -98,6 +98,11 @@ same list the model picker offers — and the line shows that row's `value`, so 
 what the menu says rather than inventing a label. Choosing one calls `$.config.set` on the
 same row, so the same writer runs behind it.
 
+The row offers aliases — `opus`, `sonnet`, `haiku` — and a bare `opus` does not say whether
+it means 5 or 5.5. The list shows what each one resolves to on this build (`Opus 5.5`,
+`Sonnet 5.5`, `Haiku 4.5`), taken from the model picker's main section, and writes the alias
+itself. That table lives in `hooks/lib/format.ts` and wants a line changed when a model ships.
+
 A row the engine reports as `isLocked` is managed: no `▾`, no list, and a press says so. Some
 models also want a consent only `/model` can take, so a refusal is toasted with the reason and
 that command rather than failing quietly.
