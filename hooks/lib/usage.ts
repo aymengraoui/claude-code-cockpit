@@ -6,7 +6,6 @@ import type { Cockpit, Window } from '../../types'
 export type UsageReading = {
   context: { percent?: number; tokens?: number; window?: number }
   rateLimits: readonly { kind: string; percentUsed: number; resetsAt?: string }[]
-  cost?: { usd: number }
 }
 
 const windowOf = (rateLimits: UsageReading['rateLimits'], kind: string): Window | null => {
@@ -24,11 +23,10 @@ const windowOf = (rateLimits: UsageReading['rateLimits'], kind: string): Window 
 export const fromUsage = (
   prev: Cockpit,
   reading: UsageReading,
-): Pick<Cockpit, 'context' | 'tokens' | 'window' | 'fiveHour' | 'sevenDay' | 'costUsd'> => ({
+): Pick<Cockpit, 'context' | 'tokens' | 'window' | 'fiveHour' | 'sevenDay'> => ({
   context: reading.context.percent ?? prev.context,
   tokens: reading.context.tokens ?? prev.tokens,
   window: reading.context.window ?? prev.window,
   fiveHour: windowOf(reading.rateLimits, 'five_hour') ?? prev.fiveHour,
   sevenDay: windowOf(reading.rateLimits, 'seven_day') ?? prev.sevenDay,
-  costUsd: reading.cost?.usd ?? prev.costUsd,
 })

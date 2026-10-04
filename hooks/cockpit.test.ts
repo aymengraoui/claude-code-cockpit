@@ -13,9 +13,7 @@ import { modeInHint } from './register'
 import { heatOf, TOKYO } from './lib/palette'
 import { subjectOf, todosOf } from './lib/tools'
 import {
-  ago,
   bar,
-  dur,
   kilo,
   modelLabel,
   modeLabel,
@@ -37,6 +35,17 @@ const STATUS = [
 ].join('\n')
 
 const NUMSTAT = ['48\t12\tsrc/parse.ts', '90\t0\tsrc/tokens.ts', '-\t-\tlogo.png', ''].join('\n')
+
+const MODEL_ROW = [
+  {
+    key: 'model',
+    label: 'Model',
+    kind: 'choice',
+    value: 'Opus 5',
+    options: ['Default (recommended)', 'Opus 5', 'Sonnet 5.5', 'Haiku 4.5'],
+    provider: { kind: 'core', tier: 'core' },
+  },
+]
 
 const USAGE = {
   startedAt: Date.now() - 600000,
@@ -81,12 +90,6 @@ test('a reset reads in the largest unit that still says something', () => {
   expect(until(at(-60000), now)).toBe(null)
   expect(until(null, now)).toBe(null)
   expect(until('not a date', now)).toBe(null)
-})
-
-test('durations read in the unit that fits', () => {
-  expect(dur(120)).toBe('120ms')
-  expect(dur(3100)).toBe('3.1s')
-  expect(dur(75000)).toBe('1m15')
 })
 
 test('a long path keeps its filename, a long command keeps its verb', () => {
@@ -156,8 +159,7 @@ test('the pane draws the usage meters it has figures for', async ($, on) => {
       { kind: 'five_hour', percentUsed: 12, resetsAt: new Date(Date.now() + 8040000).toISOString() },
       { kind: 'seven_day', percentUsed: 81 },
     ],
-    cost: { usd: 1.24 },
-    changed: ['context', 'rateLimits', 'cost'],
+      changed: ['context', 'rateLimits', 'cost'],
   })
 
   const ui = await $.ui.mount({
@@ -171,12 +173,12 @@ test('the pane draws the usage meters it has figures for', async ($, on) => {
   expect((await ui.find({ text: '37%' }))?.text).toContain('37%')
   expect((await ui.find({ text: '12%' }))?.text).toContain('12%')
   expect((await ui.find({ text: '81%' }))?.text).toContain('81%')
-  expect(await ui.find({ text: '$1.24' })).toBeDefined()
 })
 
 test('the pane draws the branch and the working tree it read from git', async ($, on) => {
   on('command.register', () => ({ value: undefined }))
   on('clock.sleep', () => ({ value: undefined }))
+  on('config.list', () => ({ value: MODEL_ROW }))
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { id: 'cockpit' } }))
   on('store.get', () => ({ value: [] }))
@@ -210,15 +212,6 @@ test('the pane draws the branch and the working tree it read from git', async ($
   expect(await ui.find({ text: 'feat/parser' })).toBeDefined()
   expect(await ui.find({ text: 'WORKING TREE' })).toBeDefined()
   expect(await ui.find({ text: '+48' })).toBeDefined()
-})
-
-test('a past timestamp reads in the largest unit that still says something', () => {
-  const now = Date.UTC(2026, 0, 8, 12, 0, 0)
-
-  expect(ago(now - 20000, now)).toBe('just now')
-  expect(ago(now - 18 * 60000, now)).toBe('18m ago')
-  expect(ago(now - 2 * 3600000, now)).toBe('2h ago')
-  expect(ago(now - 4 * 86400000, now)).toBe('4d ago')
 })
 
 test('a permission mode reads in the words the footer uses', () => {
@@ -264,6 +257,7 @@ test('the pane is primed at launch, and says so where a section is empty', async
   on('clock.now', () => ({ value: Date.now() }))
   on('command.register', () => ({ value: undefined }))
   on('clock.sleep', () => ({ value: undefined }))
+  on('config.list', () => ({ value: MODEL_ROW }))
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { id: 'cockpit' } }))
   on('store.get', () => ({ value: [] }))
@@ -298,7 +292,6 @@ test('the pane is primed at launch, and says so where a section is empty', async
   expect(await ui.find({ text: 'Opus 5' })).toBeDefined()
   expect(await ui.find({ text: '12%' })).toBeDefined()
   expect(await ui.find({ text: '24k/200k' })).toBeDefined()
-  expect(await ui.find({ text: '$0.12' })).toBeDefined()
   expect(await ui.find({ text: 'not a git repository' })).toBeDefined()
   expect(await ui.find({ text: 'no transcripts found' })).toBeDefined()
 })
@@ -511,4 +504,103 @@ test('the hint line is passed through untouched while its mode is read', async (
   })
 
   expect(drawn).toBe('⏸ plan mode on')
+})
+
+test('the model line opens a picker of the models this account may pick', async ($, on) => {
+  on('clock.now', () => ({ value: Date.now() }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
+  on('command.register', () => ({ value: undefined }))
+  on('config.list', () => ({ value: MODEL_ROW }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.model', () => ({ value: 'claude-opus-5' }))
+  on('session.usage', () => ({ value: USAGE }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 128,
+      stdout: '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
+
+  await $.session.start({ source: 'startup', cwd: '/repo' })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  // Closed to begin with: the models are not in the way until they are asked for.
+  expect(await ui.find({ key: 'model-Sonnet 5.5' })).toBeUndefined()
+
+  await ui.press({ key: 'model' })
+
+  expect(await ui.find({ key: 'model-Sonnet 5.5' })).toBeDefined()
+  expect(await ui.find({ key: 'model-Haiku 4.5' })).toBeDefined()
+})
+
+test('choosing a model switches it, and a refusal says what to run instead', async ($, on) => {
+  const chosen: string[] = []
+  const toasts: string[] = []
+
+  on('clock.now', () => ({ value: Date.now() }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
+  on('command.register', () => ({ value: undefined }))
+  on('config.list', () => ({ value: MODEL_ROW }))
+  on('config.set', (_$, e) => {
+    chosen.push(e.value as string)
+
+    return { value: e.value }
+  })
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.model', () => ({ value: 'claude-opus-5' }))
+  on('session.usage', () => ({ value: USAGE }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 128,
+      stdout: '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
+
+  await $.session.start({ source: 'startup', cwd: '/repo' })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  await ui.press({ key: 'model' })
+  await ui.press({ key: 'model-Sonnet 5.5' })
+
+  expect(chosen).toEqual(['Sonnet 5.5'])
+  expect(toasts.join(' ')).toContain('Sonnet 5.5')
+  // The list closes behind the choice.
+  expect(await ui.find({ key: 'model-Haiku 4.5' })).toBeUndefined()
 })

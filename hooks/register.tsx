@@ -3,9 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Activity, Cockpit, Past, Repo, Todo } from '../types'
 import {
-  ago,
   bar,
-  dur,
   kilo,
   modelLabel,
   modeLabel,
@@ -41,6 +39,8 @@ const TICK_MS = 2000
 const EMPTY: Cockpit = {
   model: null,
   effort: null,
+  models: [],
+  isPickerOpen: false,
   mode: null,
   project: null,
   cwd: null,
@@ -51,8 +51,6 @@ const EMPTY: Cockpit = {
   window: null,
   fiveHour: null,
   sevenDay: null,
-  costUsd: null,
-  startedAt: null,
   repo: null,
   isRepoChecked: false,
   todos: [],
@@ -190,6 +188,37 @@ const openSession = async (
   $.ui.toast(copied.isCopied ? `Copied: ${command}` : `Run it yourself: ${command}`)
 }
 
+/** The models the /config menu offers, which is exactly what this account may pick. */
+const readModels = async ($: EngineInterface): Promise<string[]> => {
+  try {
+    const row = (await $.config.list()).find(one => one.key === 'model')
+    const options = row?.options
+
+    return options === undefined ? [] : [...options]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Switch the session's model, as choosing it in `/config` would.
+ *
+ * The row is a managed one, so the engine may refuse a plugin's write; a refusal is
+ * reported rather than swallowed, with the command that does work by hand.
+ */
+const chooseModel = async ($: EngineInterface, value: string): Promise<void> => {
+  try {
+    const result = await $.config.set({ key: 'model', value })
+    $.ui.toast(
+      'deny' in result && result.deny !== undefined
+        ? `Claude Code would not switch it: ${result.deny}. Try /model ${value}`
+        : `Model set to ${value}`,
+    )
+  } catch (error) {
+    $.ui.toast(`Could not switch the model — try /model ${value}`)
+  }
+}
+
 /** This session's transcript, which says which platform this is. */
 let transcriptPath = ''
 
@@ -267,7 +296,7 @@ export const register: Register = on => {
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
-    const [now, cwd, id, usage, model, turns, repo, storedDir] = await Promise.all([
+    const [now, cwd, id, usage, model, turns, repo, storedDir, models] = await Promise.all([
       $.clock.now(),
       $.session.cwd().catch(() => ''),
       $.session.id().catch(() => ''),
@@ -276,17 +305,18 @@ export const register: Register = on => {
       $.session.turns().catch(() => null),
       readRepo($),
       rememberedDir($),
+      readModels($),
     ])
 
     const segments = toPosix(cwd).split('/').filter(one => one !== '')
     await update($, state, prev => ({
       ...prev,
       ...(usage === null ? {} : fromUsage(prev, usage)),
-      startedAt: usage?.startedAt ?? now,
       project: segments.at(-1) ?? null,
       cwd: cwd === '' ? null : toPosix(cwd),
       sessionId: id === '' ? null : id,
       model: model === null ? prev.model : modelLabel(model),
+      models,
       turns: turns ?? prev.turns,
       repo,
       isRepoChecked: true,
@@ -494,10 +524,34 @@ export const register: Register = on => {
           {it.turns !== null && <Text color={TOKYO.dim}> · {it.turns} turns</Text>}
         </Box>
         <Box>
-          <Text color={TOKYO.orange}>{it.model ?? 'no request yet'}</Text>
+          <Button
+            key="model"
+            plain
+            label={`${it.model ?? 'no request yet'}${it.models.length > 0 ? ' ▾' : ''}`}
+            onPress={() => update($, state, prev => ({ ...prev, isPickerOpen: !prev.isPickerOpen }))}
+          />
           {it.effort !== null && <Text color={TOKYO.blue}> · {it.effort}</Text>}
           {it.mode !== null && <Text color={TOKYO.accent}> · {modeLabel(it.mode)}</Text>}
         </Box>
+
+        {it.isPickerOpen && it.models.length === 0 && (
+          <Text color={TOKYO.dim}>no models offered by /config</Text>
+        )}
+        {it.isPickerOpen &&
+          it.models.map(option => (
+            <Box key={`model-row-${option}`}>
+              <Text color={TOKYO.dim}>{'  '}</Text>
+              <Button
+                key={`model-${option}`}
+                plain
+                label={option}
+                onPress={async () => {
+                  await chooseModel($, option)
+                  await update($, state, prev => ({ ...prev, isPickerOpen: false }))
+                }}
+              />
+            </Box>
+          ))}
 
         <Text color={TOKYO.line}>{rule}</Text>
 
@@ -517,12 +571,6 @@ export const register: Register = on => {
           Meter({ label: '5h', percent: it.fiveHour.percent, resetsAt: it.fiveHour.resetsAt })}
         {it.sevenDay !== null &&
           Meter({ label: 'week', percent: it.sevenDay.percent, resetsAt: it.sevenDay.resetsAt })}
-        <Box>
-          <Text color={TOKYO.dim}>{'cost'.padEnd(5)}</Text>
-          <Text color={TOKYO.text}>{it.costUsd === null ? '—' : `$${it.costUsd.toFixed(2)}`}</Text>
-          {it.startedAt !== null && <Text color={TOKYO.dim}> · {dur(now - it.startedAt)}</Text>}
-        </Box>
-
         <Text color={TOKYO.line}>{rule}</Text>
         {it.repo === null ? (
           <Text color={TOKYO.dim}>{it.isRepoChecked ? 'not a git repository' : 'reading git…'}</Text>

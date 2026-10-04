@@ -9,12 +9,11 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 ```
 ╭─ cockpit ──────────────────────────╮
 │ my-app · 7 turns                   │
-│ Opus 5 · high · plan               │
+│ Opus 5 ▾ · high · plan             │
 │ ────────────────────────────────── │
 │ ctx  ▰▰▱▱▱  37% 74k/200k           │
 │ 5h   ▰▱▱▱▱  12% ↻ 2h14             │
 │ week ▰▰▰▰▱  81% ↻ 4d               │
-│ cost $1.24 · 1h15m                 │
 │ ────────────────────────────────── │
 │ feat/parser ↑2                     │
 │ WORKING TREE 3                     │
@@ -77,8 +76,9 @@ process it ever starts is `git`:
 | everything above, at launch | `$.session.usage()`, `$.session.model()` and `$.session.turns()`, asked for in `session.start` |
 | model, effort | `turn.step`, as each request goes out |
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
+| the models you may pick | `$.config.list()`, the same rows `/config` draws |
 | permission mode | the words the prompt's hint line is drawing, read as it redraws |
-| context fill, 5h and weekly windows, cost | `session.measure` |
+| context fill, 5h and weekly windows | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
 | running agents | `tool.call` on the `Agent` tool, timed around `next(e)` |
 | Claude Code's sessions | the transcripts in this project's transcript directory, found through the `transcript_path` the classic hook inputs carry |
@@ -92,6 +92,11 @@ rows and slash-command echoes skipped), or by its id where it holds no prompt ye
 Titles are cached in `$.store`: a session's first prompt cannot change, so each transcript is
 read at most once ever and later listings only stat the directory. The directory itself is
 cached too, so a reload lists the sessions before any prompt has been typed.
+
+**Press the model to change it.** `▾` means `/config` offered a list; pressing opens it under
+the line and choosing one calls `$.config.set`, exactly as picking it in the menu would. It is
+a managed row, so the engine may refuse a plugin's write — a refusal is reported in a toast
+with the `/model` command that does it by hand, rather than failing quietly.
 
 **Press a session to open it.** The hook API exposes no way to switch sessions in place —
 `--resume` is a launch flag — so a press opens `claude --resume <id>` in a terminal of its

@@ -38,15 +38,6 @@ export const until = (iso: string | null, now = Date.now()): string | null => {
   return `${minutes}m`
 }
 
-/** A duration as `840ms`, `3.1s`, `2m04`. */
-export const dur = (ms: number): string => {
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  const minutes = Math.floor(ms / 60000)
-
-  return `${minutes}m${String(Math.round((ms % 60000) / 1000)).padStart(2, '0')}`
-}
-
 /**
  * A path cut to `width` from the left, so the filename always survives:
  * `src/engine/parse.ts` at 14 becomes `…ngine/parse.ts`.
@@ -74,16 +65,6 @@ export const kilo = (n: number): string => {
   if (Math.abs(n) >= 1000) return `${Math.round(n / 1000)}k`
 
   return String(Math.round(n))
-}
-
-/** `2h ago`, `4d ago`, `just now` — for timestamps in the past. */
-export const ago = (at: number, now = Date.now()): string => {
-  const minutes = Math.round((now - at) / 60000)
-  if (!Number.isFinite(minutes) || minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`
-
-  return `${Math.floor(minutes / 1440)}d ago`
 }
 
 const MODE_LABELS: Readonly<Record<string, string>> = {

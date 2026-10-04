@@ -53,6 +53,10 @@ export type Past = {
 export type Cockpit = {
   model: string | null
   effort: string | null
+  /** The models this account may pick, as the /config menu offers them. */
+  models: string[]
+  /** True while the model list is showing under the model line. */
+  isPickerOpen: boolean
   /** Permission mode, as the classic hook inputs report it. */
   mode: string | null
   /** The directory the session runs in, by its last segment. */
@@ -69,8 +73,6 @@ export type Cockpit = {
   window: number | null
   fiveHour: Window | null
   sevenDay: Window | null
-  costUsd: number | null
-  startedAt: number | null
   repo: Repo | null
   /** True once git has been asked and said this is not a repository. */
   isRepoChecked: boolean
