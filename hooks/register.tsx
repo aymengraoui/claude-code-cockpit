@@ -557,12 +557,17 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column">
-        {/* The model has the row to itself, so its name is never cut. */}
+        <Box>
+          <Text color={TOKYO.text} bold>
+            {it.project ?? 'claude'}
+          </Text>
+          {it.turns !== null && <Text color={TOKYO.dim}> · {it.turns} turns</Text>}
+        </Box>
         <Box>
           <Button
             key="model"
             plain
-            label={`${it.modelChoice ?? it.model ?? 'no request yet'}${
+            label={`${shortText(it.modelChoice ?? it.model ?? 'no request yet', Math.max(8, columns - 18))}${
               it.models.length > 0 && !it.isModelLocked ? ' ▾' : ''
             }`}
             onPress={() => {
@@ -575,10 +580,6 @@ export const register: Register = on => {
               return update($, state, prev => ({ ...prev, isPickerOpen: !prev.isPickerOpen }))
             }}
           />
-        </Box>
-        <Box>
-          <Text color={TOKYO.text}>{it.project ?? 'claude'}</Text>
-          {it.turns !== null && <Text color={TOKYO.dim}> · {it.turns} turns</Text>}
           {it.effort !== null && <Text color={TOKYO.blue}> · {it.effort}</Text>}
           {it.mode !== null && <Text color={TOKYO.accent}> · {modeLabel(it.mode)}</Text>}
         </Box>
@@ -595,7 +596,7 @@ export const register: Register = on => {
               <Button
                 key={`model-${option}`}
                 plain
-                label={option}
+                label={shortText(option, Math.max(6, columns - 3))}
                 onPress={async () => {
                   const isSet = await chooseModel($, option)
                   const row = isSet ? await readModelRow($) : null
