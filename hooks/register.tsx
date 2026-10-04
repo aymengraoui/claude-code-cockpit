@@ -6,7 +6,6 @@ import {
   bar,
   kilo,
   modelLabel,
-  optionLabel,
   modeLabel,
   shortPath,
   shortText,
@@ -40,10 +39,7 @@ const TICK_MS = 2000
 const EMPTY: Cockpit = {
   model: null,
   effort: null,
-  models: [],
   modelChoice: null,
-  isModelLocked: false,
-  isPickerOpen: false,
   mode: null,
   project: null,
   cwd: null,
@@ -191,54 +187,35 @@ const openSession = async (
   $.ui.toast(copied.isCopied ? `Copied: ${command}` : `Run it yourself: ${command}`)
 }
 
-/** The /config model row: the same options, value and lock the menu reads. */
-type ModelRow = { value: string | null; options: string[]; isLocked: boolean }
-
 /**
- * The model row as `/config` has it.
- *
- * Its `options` are the list the model picker offers and its `value` the name they show
- * for the current one, so the pane shows what the menu shows rather than a label of its
- * own. A locked row is managed, and nobody may write it from here.
+ * The name /config shows for the current model — the same one /model shows — so the pane
+ * never names a model differently from the menus.
  */
-const readModelRow = async ($: EngineInterface): Promise<ModelRow> => {
+const readModelName = async ($: EngineInterface): Promise<string | null> => {
   try {
     const row = (await $.config.list()).find(one => one.key === 'model')
-    if (row === undefined) return { value: null, options: [], isLocked: false }
 
-    return {
-      value: typeof row.value === 'string' ? row.value : null,
-      options: row.options === undefined ? [] : [...row.options],
-      isLocked: row.isLocked,
-    }
+    return typeof row?.value === 'string' ? row.value : null
   } catch {
-    return { value: null, options: [], isLocked: false }
+    return null
   }
 }
 
 /**
- * Switch the session's model, as choosing it in `/config` would — the same row, so the
- * same writer runs behind it.
+ * Open the real `/model` picker.
  *
- * A refusal is reported rather than swallowed: the row is managed, and some models want
- * consent that only `/model` can take.
+ * Its list depends on the account — plan-gated models, context-window variants, a model
+ * that wants consent first — and none of that is exposed to a plugin, so no copy of it
+ * here could be exact. Running the command itself is: the same list, the same switching.
+ * Should the engine refuse the run, `/model` is left in the prompt box, one Enter away.
  */
-const chooseModel = async ($: EngineInterface, value: string, label: string): Promise<boolean> => {
+const openModelPicker = async ($: EngineInterface): Promise<void> => {
   try {
-    const result = await $.config.set({ key: 'model', value })
-    const deny = 'deny' in result ? result.deny : undefined
-    if (deny !== undefined) {
-      $.ui.toast(`Claude Code would not switch it: ${deny} — try /model`)
-
-      return false
-    }
-    $.ui.toast(`Model set to ${label}`)
-
-    return true
+    // A run that cannot happen rejects — an unknown name, or a turn waiting on a hook.
+    await $.command.run({ command: 'model' })
   } catch {
-    $.ui.toast(`Could not switch the model here — try /model ${value}`)
-
-    return false
+    const filled = await $.prompt.fill({ text: '/model' }).catch(() => ({ isFilled: false }))
+    $.ui.toast(filled.isFilled ? 'Press Enter to choose a model' : 'Run /model to choose a model')
   }
 }
 
@@ -330,7 +307,7 @@ export const register: Register = on => {
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
-    const [now, cwd, id, usage, model, turns, repo, storedDir, modelRow] = await Promise.all([
+    const [now, cwd, id, usage, model, turns, repo, storedDir, modelName] = await Promise.all([
       $.clock.now(),
       $.session.cwd().catch(() => ''),
       $.session.id().catch(() => ''),
@@ -339,7 +316,7 @@ export const register: Register = on => {
       $.session.turns().catch(() => null),
       readRepo($),
       rememberedDir($),
-      readModelRow($),
+      readModelName($),
     ])
 
     const segments = toPosix(cwd).split('/').filter(one => one !== '')
@@ -350,9 +327,7 @@ export const register: Register = on => {
       cwd: cwd === '' ? null : toPosix(cwd),
       sessionId: id === '' ? null : id,
       model: model === null ? prev.model : modelLabel(model),
-      models: modelRow.options,
-      modelChoice: modelRow.value,
-      isModelLocked: modelRow.isLocked,
+      modelChoice: modelName,
       turns: turns ?? prev.turns,
       repo,
       isRepoChecked: true,
@@ -485,11 +460,11 @@ export const register: Register = on => {
 
   // The working tree is re-read between turns, not per edit: one pair of git calls a turn.
   on('turn.complete', async ($, e, next) => {
-    const [repo, turns, history, modelRow] = await Promise.all([
+    const [repo, turns, history, modelName] = await Promise.all([
       readRepo($),
       $.session.turns().catch(() => null),
       dir === '' ? Promise.resolve(null) : readSessions($, dir),
-      readModelRow($),
+      readModelName($),
     ])
     await update($, state, prev => ({
       ...prev,
@@ -497,9 +472,7 @@ export const register: Register = on => {
       isRepoChecked: true,
       turns,
       history: history ?? prev.history,
-      models: modelRow.options,
-      modelChoice: modelRow.value,
-      isModelLocked: modelRow.isLocked,
+      modelChoice: modelName,
     }))
 
     return next(e)
@@ -519,8 +492,6 @@ export const register: Register = on => {
     // The lists share what is left under the fixed rows; each keeps at least two.
     const listRoom = Math.max(3, Math.floor((rows - 18) / 2))
     const rule = '─'.repeat(columns)
-    const isCurrent = (option: string): boolean =>
-      option === it.modelChoice || optionLabel(option) === it.modelChoice
     const added = changes.reduce((sum, one) => sum + one.added, 0)
     const removed = changes.reduce((sum, one) => sum + one.removed, 0)
 
@@ -570,54 +541,12 @@ export const register: Register = on => {
           <Button
             key="model"
             plain
-            label={`${shortText(it.modelChoice ?? it.model ?? 'no request yet', Math.max(8, columns - 18))}${
-              it.models.length > 0 && !it.isModelLocked ? ' ▾' : ''
-            }`}
-            onPress={() => {
-              if (it.isModelLocked) {
-                $.ui.toast('The model is managed here and cannot be changed')
-
-                return
-              }
-
-              return update($, state, prev => ({ ...prev, isPickerOpen: !prev.isPickerOpen }))
-            }}
+            label={`${shortText(it.modelChoice ?? it.model ?? 'no request yet', Math.max(8, columns - 18))} ▾`}
+            onPress={() => openModelPicker($)}
           />
           {it.effort !== null && <Text color={TOKYO.blue}> · {it.effort}</Text>}
           {it.mode !== null && <Text color={TOKYO.accent}> · {modeLabel(it.mode)}</Text>}
         </Box>
-
-        {it.isPickerOpen && it.models.length === 0 && (
-          <Text color={TOKYO.dim}>/config offers no model list here</Text>
-        )}
-        {it.isPickerOpen &&
-          it.models.map(option => (
-            <Box key={`model-row-${option}`}>
-              <Text color={isCurrent(option) ? TOKYO.orange : TOKYO.dim}>
-                {isCurrent(option) ? '▸ ' : '  '}
-              </Text>
-              <Button
-                key={`model-${option}`}
-                plain
-                label={optionLabel(option)}
-                onPress={async () => {
-                  const isSet = await chooseModel($, option, optionLabel(option))
-                  const row = isSet ? await readModelRow($) : null
-                  await update($, state, prev => ({
-                    ...prev,
-                    isPickerOpen: false,
-                    ...(row === null
-                      ? {}
-                      : {
-                          models: row.options,
-                          modelChoice: row.value,
-                          isModelLocked: row.isLocked,
-                        }),
-                  }))
-                }}
-              />
-            </Box>
-          ))}
 
         <Text color={TOKYO.line}>{rule}</Text>
 

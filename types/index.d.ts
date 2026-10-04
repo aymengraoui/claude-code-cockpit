@@ -53,14 +53,8 @@ export type Past = {
 export type Cockpit = {
   model: string | null
   effort: string | null
-  /** The models this account may pick, exactly as the /config model row offers them. */
-  models: string[]
-  /** That row's current value: the name the menu and /model show for it. */
+  /** The name /model and /config show for the current model. */
   modelChoice: string | null
-  /** True when the row is managed and nobody may write it here. */
-  isModelLocked: boolean
-  /** True while the model list is showing under the model line. */
-  isPickerOpen: boolean
   /** Permission mode, as the classic hook inputs report it. */
   mode: string | null
   /** The directory the session runs in, by its last segment. */

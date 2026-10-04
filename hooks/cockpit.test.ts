@@ -16,7 +16,6 @@ import {
   bar,
   kilo,
   modelLabel,
-  optionLabel,
   modeLabel,
   shortPath,
   shortText,
@@ -520,7 +519,7 @@ test('the hint line is passed through untouched while its mode is read', async (
   expect(drawn).toBe('⏸ plan mode on')
 })
 
-test('the model line opens a picker of the models this account may pick', async ($, on) => {
+const startPane = async ($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<Parameters<typeof test>[1]>[1]) => {
   on('clock.now', () => ({ value: Date.now() }))
   on('clock.sleep', () => ({ value: undefined }))
   on('ui.panes', () => ({ value: [] }))
@@ -531,7 +530,7 @@ test('the model line opens a picker of the models this account may pick', async 
   on('session.cwd', () => ({ value: '/repo' }))
   on('session.id', () => ({ value: 'current' }))
   on('session.turns', () => ({ value: 1 }))
-  on('session.model', () => ({ value: 'claude-opus-5' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.usage', () => ({ value: USAGE }))
   on('process.run', () => ({
     value: {
@@ -546,220 +545,55 @@ test('the model line opens a picker of the models this account may pick', async 
 
   await $.session.start({ source: 'startup', cwd: '/repo' })
 
-  const ui = await $.ui.mount({
+  return $.ui.mount({
     plugin: 'cockpit',
     surface: 'terminal',
     component: 'Pane',
     requestId: 'cockpit',
     props: PANE_PROPS,
   })
+}
 
-  // Closed to begin with: the models are not in the way until they are asked for.
-  expect(await ui.find({ key: 'model-sonnet' })).toBeUndefined()
+test('the model line names the model as /config and /model do', async ($, on) => {
+  const ui = await startPane($, on)
 
-  await ui.press({ key: 'model' })
-
-  expect(await ui.find({ key: 'model-sonnet' })).toBeDefined()
-  expect(await ui.find({ key: 'model-haiku' })).toBeDefined()
-})
-
-test('choosing a model switches it, and a refusal says what to run instead', async ($, on) => {
-  const chosen: string[] = []
-  const toasts: string[] = []
-
-  on('clock.now', () => ({ value: Date.now() }))
-  on('clock.sleep', () => ({ value: undefined }))
-  on('ui.panes', () => ({ value: [] }))
-  on('command.register', () => ({ value: undefined }))
-  on('config.list', () => ({ value: MODEL_ROW }))
-  on('config.set', (_$, e) => {
-    chosen.push(e.value as string)
-
-    return { value: e.value }
-  })
-  on('ui.toast', (_$, e) => {
-    toasts.push(e.text)
-
-    return { value: undefined }
-  })
-  on('ui.open', () => ({ value: { id: 'cockpit' } }))
-  on('store.get', () => ({ value: [] }))
-  on('session.cwd', () => ({ value: '/repo' }))
-  on('session.id', () => ({ value: 'current' }))
-  on('session.turns', () => ({ value: 1 }))
-  on('session.model', () => ({ value: 'claude-opus-5' }))
-  on('session.usage', () => ({ value: USAGE }))
-  on('process.run', () => ({
-    value: {
-      exitCode: 128,
-      stdout: '',
-      stderr: '',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-    },
-  }))
-  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
-
-  await $.session.start({ source: 'startup', cwd: '/repo' })
-
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: PANE_PROPS,
-  })
-
-  await ui.press({ key: 'model' })
-  await ui.press({ key: 'model-sonnet' })
-
-  expect(chosen).toEqual(['sonnet'])
-  expect(toasts.join(' ')).toContain('Sonnet 5.5')
-  // The list closes behind the choice.
-  expect(await ui.find({ key: 'model-haiku' })).toBeUndefined()
-})
-
-test("the pane shows the config row value, and marks it in the list", async ($, on) => {
-  on('clock.now', () => ({ value: Date.now() }))
-  on('clock.sleep', () => ({ value: undefined }))
-  on('ui.panes', () => ({ value: [] }))
-  on('command.register', () => ({ value: undefined }))
-  on('config.list', () => ({ value: MODEL_ROW }))
-  on('ui.open', () => ({ value: { id: 'cockpit' } }))
-  on('store.get', () => ({ value: [] }))
-  on('session.cwd', () => ({ value: '/repo' }))
-  on('session.id', () => ({ value: 'current' }))
-  on('session.turns', () => ({ value: 1 }))
-  on('session.model', () => ({ value: 'claude-sonnet-5-5' }))
-  on('session.usage', () => ({ value: USAGE }))
-  on('process.run', () => ({
-    value: {
-      exitCode: 128,
-      stdout: '',
-      stderr: '',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-    },
-  }))
-  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
-
-  await $.session.start({ source: 'startup', cwd: '/repo' })
-
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: PANE_PROPS,
-  })
-
-  // The row says Opus 5 even though the resolved model is Sonnet: the menu's word wins.
   expect((await ui.find({ key: 'model' }))?.text).toContain('Opus 5')
-
-  await ui.press({ key: 'model' })
-
-  expect(await ui.find({ text: 'Default (recommended)' })).toBeDefined()
 })
 
-test('a managed model row offers no picker and says why', async ($, on) => {
-  const toasts: string[] = []
+test('pressing the model opens the real /model picker', async ($, on) => {
+  const ran: string[] = []
+  on('command.run', (_$, e) => {
+    ran.push(e.command)
 
-  on('clock.now', () => ({ value: Date.now() }))
-  on('clock.sleep', () => ({ value: undefined }))
-  on('ui.panes', () => ({ value: [] }))
-  on('command.register', () => ({ value: undefined }))
-  on('config.list', () => ({ value: LOCKED_MODEL_ROW }))
-  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+    return { text: '' }
+  })
+
+  const ui = await startPane($, on)
+  await ui.press({ key: 'model' })
+
+  expect(ran).toEqual(['model'])
+})
+
+test('when /model cannot be run from here, it is left in the prompt box', async ($, on) => {
+  const filled: string[] = []
+  const toasts: string[] = []
+  on('command.run', () => {
+    throw new Error('the session is busy')
+  })
+  on('prompt.fill', (_$, e) => {
+    filled.push(e.text)
+
+    return { isFilled: true }
+  })
   on('ui.toast', (_$, e) => {
     toasts.push(e.text)
 
     return { value: undefined }
   })
-  on('store.get', () => ({ value: [] }))
-  on('session.cwd', () => ({ value: '/repo' }))
-  on('session.id', () => ({ value: 'current' }))
-  on('session.turns', () => ({ value: 1 }))
-  on('session.model', () => ({ value: 'claude-opus-5' }))
-  on('session.usage', () => ({ value: USAGE }))
-  on('process.run', () => ({
-    value: {
-      exitCode: 128,
-      stdout: '',
-      stderr: '',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-    },
-  }))
-  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
 
-  await $.session.start({ source: 'startup', cwd: '/repo' })
-
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: PANE_PROPS,
-  })
-
-  expect((await ui.find({ key: 'model' }))?.text).not.toContain('▾')
-
+  const ui = await startPane($, on)
   await ui.press({ key: 'model' })
 
-  expect(await ui.find({ key: 'model-sonnet' })).toBeUndefined()
-  expect(toasts.join(' ')).toContain('managed')
-})
-
-test('an alias the model row offers reads as its model and version', () => {
-  expect(optionLabel('opus')).toBe('Opus 5.5')
-  expect(optionLabel('sonnet')).toBe('Sonnet 5.5')
-  expect(optionLabel('haiku')).toBe('Haiku 4.5')
-  expect(optionLabel('fable')).toBe('Fable 5.1')
-  expect(optionLabel('default')).toBe('Default (recommended)')
-  expect(optionLabel('Opus')).toBe('Opus 5.5')
-  // Something new is shown as given rather than hidden.
-  expect(optionLabel('claude-next-9')).toBe('claude-next-9')
-})
-
-test('the list says which Opus it means, and marks only what is really set', async ($, on) => {
-  on('clock.now', () => ({ value: Date.now() }))
-  on('clock.sleep', () => ({ value: undefined }))
-  on('ui.panes', () => ({ value: [] }))
-  on('command.register', () => ({ value: undefined }))
-  // Pinned to Opus 5, which none of the aliases is: opus is 5.5.
-  on('config.list', () => ({ value: MODEL_ROW }))
-  on('ui.open', () => ({ value: { id: 'cockpit' } }))
-  on('store.get', () => ({ value: [] }))
-  on('session.cwd', () => ({ value: '/repo' }))
-  on('session.id', () => ({ value: 'current' }))
-  on('session.turns', () => ({ value: 1 }))
-  on('session.model', () => ({ value: 'claude-opus-5' }))
-  on('session.usage', () => ({ value: USAGE }))
-  on('process.run', () => ({
-    value: {
-      exitCode: 128,
-      stdout: '',
-      stderr: '',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-    },
-  }))
-  on('session.start', () => ({ sessionId: 'current', cwd: '/repo' }))
-
-  await $.session.start({ source: 'startup', cwd: '/repo' })
-
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: PANE_PROPS,
-  })
-
-  await ui.press({ key: 'model' })
-
-  expect((await ui.find({ key: 'model-opus' }))?.text).toBe('Opus 5.5')
-  expect((await ui.find({ key: 'model-sonnet' }))?.text).toBe('Sonnet 5.5')
-  // Opus 5 is set, so the Opus 5.5 row must not claim to be current.
-  expect(await ui.find({ text: '▸ ' })).toBeUndefined()
+  expect(filled).toEqual(['/model'])
+  expect(toasts.join(' ')).toContain('Enter')
 })

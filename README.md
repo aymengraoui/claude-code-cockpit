@@ -9,7 +9,7 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 ```
 ╭─ cockpit ──────────────────────────╮
 │ my-app · 7 turns                   │
-│ Opus 5 ▾ · high · plan             │
+│ Opus 5.5 ▾ · high · plan           │
 │ ────────────────────────────────── │
 │ ctx  ▰▰▱▱▱  37% 74k/200k           │
 │ 5h   ▰▱▱▱▱  12% ↻ 2h14             │
@@ -76,7 +76,7 @@ process it ever starts is `git`:
 | everything above, at launch | `$.session.usage()`, `$.session.model()` and `$.session.turns()`, asked for in `session.start` |
 | model, effort | `turn.step`, as each request goes out |
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
-| the models you may pick | the `/config` model row: its `options`, its `value` and its lock |
+| the model's name | the `/config` model row's value, the name `/model` shows too |
 | permission mode | the words the prompt's hint line is drawing, read as it redraws |
 | context fill, 5h and weekly windows | `session.measure` |
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
@@ -93,19 +93,16 @@ Titles are cached in `$.store`: a session's first prompt cannot change, so each 
 read at most once ever and later listings only stat the directory. The directory itself is
 cached too, so a reload lists the sessions before any prompt has been typed.
 
-**Press the model to change it.** The list is the `/config` model row's own `options` — the
-same list the model picker offers — and the line shows that row's `value`, so the pane says
-what the menu says rather than inventing a label. Choosing one calls `$.config.set` on the
-same row, so the same writer runs behind it.
+**Press the model to change it.** This opens the real `/model` picker, via
+`$.command.run({ command: 'model' })`, which runs a slash command as if you had typed it.
+The pane deliberately has no model list of its own. `/model`'s list depends on your
+account (plan-gated models, context-window variants, models that need consent first), and
+none of that is exposed to a plugin, so any copy here would be incomplete. Running the
+command itself gives the same list and the same switching. If the engine refuses the run,
+`/model` is put in the prompt box instead, one Enter away.
 
-The row offers aliases — `opus`, `sonnet`, `haiku` — and a bare `opus` does not say whether
-it means 5 or 5.5. The list shows what each one resolves to on this build (`Opus 5.5`,
-`Sonnet 5.5`, `Haiku 4.5`), taken from the model picker's main section, and writes the alias
-itself. That table lives in `hooks/lib/format.ts` and wants a line changed when a model ships.
-
-A row the engine reports as `isLocked` is managed: no `▾`, no list, and a press says so. Some
-models also want a consent only `/model` can take, so a refusal is toasted with the reason and
-that command rather than failing quietly.
+The model line uses the name `/config` and `/model` show, so the pane never names a model
+differently from the menus.
 
 **Press a session to open it.** The hook API exposes no way to switch sessions in place —
 `--resume` is a launch flag — so a press opens `claude --resume <id>` in a terminal of its
