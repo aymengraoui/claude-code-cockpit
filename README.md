@@ -40,6 +40,7 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 │ now       enhance the cockpit      │
 │ 2h ago    fix the parser rounding  │
 │ 1d ago    add the cockpit pane     │
+│ press a session to copy its resume │
 ╰────────────────────────────────────╯
 ```
 
@@ -86,7 +87,12 @@ The eight newest are listed, each titled by the first prompt its author actually
 rows and slash-command echoes skipped), or by its id where it holds no prompt yet.
 
 Titles are cached in `$.store`: a session's first prompt cannot change, so each transcript is
-read at most once ever and later listings only stat the directory.
+read at most once ever and later listings only stat the directory. The directory itself is
+cached too, so a reload lists the sessions before any prompt has been typed.
+
+**Press a session to copy its resume command.** The hook API exposes no way to switch sessions
+in place — `--resume` is a launch flag — so a press puts `claude --resume <id>` on the
+clipboard and says so in a toast, ready to paste into a new terminal.
 
 Two read-only `git` calls per completed turn, not per edit — the pane costs a few milliseconds
 a turn and never writes to your repo.
@@ -118,6 +124,10 @@ engine at all.
 
 Sections that have nothing to show say so — `not a git repository`, `nothing yet` — rather
 than vanishing, so a quiet pane reads as quiet instead of broken.
+
+The pane ticks every two seconds while it is open: durations, resets and `ago` are all read at
+draw time, so a tick that stamps the state is enough to move every clock, and it re-reads the
+usage figures as it goes. It stops the moment the pane is closed and never runs twice.
 
 The pane is primed in `session.start`, so it is populated the moment it opens rather than
 filling in as events arrive: the engine already holds the usage figures, the model and the

@@ -1,6 +1,13 @@
 import { expect, test } from 'claude-code/testing'
 
-import { dirOf, idOf, pickRecent, titleFromTranscript, toPast } from './lib/sessions'
+import {
+  dirOf,
+  idOf,
+  pickRecent,
+  resumeCommand,
+  titleFromTranscript,
+  toPast,
+} from './lib/sessions'
 import { subjectOf, todosOf } from './lib/tools'
 import {
   ago,
@@ -167,6 +174,8 @@ test('the pane draws the usage meters it has figures for', async ($, on) => {
 
 test('the pane draws the branch and the working tree it read from git', async ($, on) => {
   on('command.register', () => ({ value: undefined }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { id: 'cockpit' } }))
   on('store.get', () => ({ value: [] }))
   on('session.cwd', () => ({ value: '/repo' }))
@@ -252,6 +261,8 @@ test('the subject column says what a call is about, per tool', () => {
 test('the pane is primed at launch, and says so where a section is empty', async ($, on) => {
   on('clock.now', () => ({ value: Date.now() }))
   on('command.register', () => ({ value: undefined }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { id: 'cockpit' } }))
   on('store.get', () => ({ value: [] }))
   on('session.cwd', () => ({ value: '/home/me/notes' }))
@@ -369,4 +380,48 @@ test("the pane lists Claude Code's own sessions, read from its transcripts", asy
   expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
   expect(await ui.find({ text: 'fix the parser' })).toBeDefined()
   expect(await ui.find({ text: '2h ago' })).toBeDefined()
+})
+
+test('a session names the command that returns to it', () => {
+  expect(resumeCommand('abc-123')).toBe('claude --resume abc-123')
+})
+
+test('pressing a session copies its resume command', async ($, on) => {
+  const sep = String.fromCharCode(92)
+  const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
+  let copied: string | undefined
+  let toasted: string | undefined
+
+  on('store.get', () => ({ value: {} }))
+  on('store.set', () => ({ value: undefined }))
+  on('fs.list', () => ({
+    value: [{ name: 'older.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() - 7200000 }],
+  }))
+  on('fs.read', () => ({ value: TRANSCRIPT }))
+  on('classic.SessionStart', () => ({}))
+  on('ui.copy', (_$, e) => {
+    copied = e.text
+
+    return { value: { isCopied: true } }
+  })
+  on('ui.toast', (_$, e) => {
+    toasted = e.text
+
+    return { value: undefined }
+  })
+
+  await $.classic.SessionStart({ source: 'startup', transcript_path: path })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  await ui.press({ key: 'past-older' })
+
+  expect(copied).toBe('claude --resume older')
+  expect(toasted).toContain('claude --resume older')
 })

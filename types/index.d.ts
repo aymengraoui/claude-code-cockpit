@@ -77,6 +77,8 @@ export type Cockpit = {
   agents: Activity[]
   /** Claude Code's recent sessions, newest first, this one included. */
   history: Past[]
+  /** When the live ticker last looked; a redraw of the clocks hangs off it. */
+  tickedAt: number | null
 }
 
 declare module 'claude-code' {

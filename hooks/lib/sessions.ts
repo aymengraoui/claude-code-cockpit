@@ -98,3 +98,6 @@ export const toPast = (entry: Entry, title: string | null): Past => ({
   at: entry.mtimeMs,
   title: title ?? idOf(entry.name).slice(0, 8),
 })
+
+/** The command that returns to a session, for the clipboard. */
+export const resumeCommand = (id: string): string => `claude --resume ${id}`

@@ -17,14 +17,25 @@ import {
 } from './lib/format'
 import { parseNumstat, parseStatus, withCounts } from './lib/git'
 import { subjectOf, todosOf } from './lib/tools'
-import { dirOf, MAX_READ_BYTES, pickRecent, titleFromTranscript, toPast } from './lib/sessions'
+import {
+  dirOf,
+  MAX_READ_BYTES,
+  pickRecent,
+  resumeCommand,
+  titleFromTranscript,
+  toPast,
+} from './lib/sessions'
 import { fromUsage } from './lib/usage'
 
 const PANE = 'cockpit'
 
 /** `$.store` key holding transcript titles, which never change once written. */
 const TITLES = 'cockpit.titles'
+/** `$.store` key holding the transcript directory, so a reload knows it before any prompt. */
+const DIR = 'cockpit.transcriptDir'
 const SESSIONS_LISTED = 8
+/** How often the pane's clocks and figures are refreshed while it is open. */
+const TICK_MS = 2000
 
 const EMPTY: Cockpit = {
   model: null,
@@ -46,6 +57,7 @@ const EMPTY: Cockpit = {
   activity: [],
   agents: [],
   history: [],
+  tickedAt: null,
 }
 
 const state = atom({ plugin: 'cockpit', key: 'state' } as const, EMPTY)
@@ -80,8 +92,7 @@ const readTitles = async ($: EngineInterface): Promise<Record<string, string>> =
  * Each transcript is read at most once ever: its first prompt cannot change, so the
  * title goes into `$.store` and later listings only stat the directory.
  */
-const readSessions = async ($: EngineInterface, transcriptPath: string): Promise<Past[]> => {
-  const dir = dirOf(transcriptPath)
+const readSessions = async ($: EngineInterface, dir: string): Promise<Past[]> => {
   if (dir === '') return []
 
   let entries
@@ -134,16 +145,66 @@ const readRepo = async ($: EngineInterface): Promise<Repo | null> => {
   return withCounts(parseStatus(status), parseNumstat(numstat), mine)
 }
 
+/** The transcript directory, from the store when a classic hook has not named it yet. */
+const rememberedDir = async ($: EngineInterface): Promise<string> => {
+  try {
+    const stored = await $.store.get(DIR)
+
+    return typeof stored === 'string' ? stored : ''
+  } catch {
+    return ''
+  }
+}
+
+/** One ticker at a time, however many times the pane is opened. */
+let isTicking = false
+
+/**
+ * The pane's clocks move on their own: durations, resets and `ago` are all read at draw
+ * time, so a tick that only stamps the state is enough to refresh them. It stops as soon
+ * as the pane is closed, and never runs twice.
+ */
+const startTicking = ($: EngineInterface): void => {
+  if (isTicking) return
+  isTicking = true
+
+  void (async () => {
+    try {
+      for (;;) {
+        // Nothing here may reject: an unhandled rejection in a detached loop would
+        // take the tick with it and say nothing.
+        const slept = await $.clock
+          .sleep(TICK_MS)
+          .then(() => true)
+          .catch(() => false)
+        if (!slept) break
+
+        const panes = await $.ui.panes().catch(() => [])
+        if (!panes.some(one => one.id === PANE)) break
+
+        const usage = await $.session.usage().catch(() => null)
+        await update($, state, prev => ({
+          ...prev,
+          ...(usage === null ? {} : fromUsage(prev, usage)),
+          tickedAt: Date.now(),
+        }))
+      }
+    } finally {
+      isTicking = false
+    }
+  })()
+}
+
 export const register: Register = on => {
-  /** This session's transcript, as a classic hook input named it. */
-  let transcript = ''
+  /** The transcript directory for this project, once anything has named it. */
+  let dir = ''
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'cockpit', description: 'Open the cockpit pane' })
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
-    const [now, cwd, id, usage, model, turns, repo] = await Promise.all([
+    const [now, cwd, id, usage, model, turns, repo, storedDir] = await Promise.all([
       $.clock.now(),
       $.session.cwd().catch(() => ''),
       $.session.id().catch(() => ''),
@@ -151,6 +212,7 @@ export const register: Register = on => {
       $.session.model().catch(() => null),
       $.session.turns().catch(() => null),
       readRepo($),
+      rememberedDir($),
     ])
 
     const segments = toPosix(cwd).split('/').filter(one => one !== '')
@@ -166,14 +228,23 @@ export const register: Register = on => {
       isRepoChecked: true,
     }))
 
+    // A reload, or a session opened before any prompt, still has a directory to list.
+    if (storedDir !== '') {
+      dir = storedDir
+      const history = await readSessions($, storedDir)
+      await update($, state, prev => ({ ...prev, history }))
+    }
+
     // Opened unasked, the pane seats itself only once the terminal is wide enough.
     void $.ui.open({ id: PANE, title: 'cockpit' })
+    startTicking($)
 
     return next(e)
   })
 
   on('command.run', { command: 'cockpit' }, async $ => {
     await $.ui.open({ id: PANE, title: 'cockpit' })
+    startTicking($)
 
     return { text: 'Cockpit pane opened.' }
   })
@@ -183,7 +254,11 @@ export const register: Register = on => {
   on('classic.UserPromptSubmit', async ($, e, next) => {
     const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
     if (typeof e.transcript_path === 'string' && e.transcript_path !== '') {
-      transcript = e.transcript_path
+      const named = dirOf(e.transcript_path)
+      if (named !== dir) {
+        dir = named
+        await $.store.set(DIR, named).catch(() => undefined)
+      }
     }
     await update($, state, prev => ({ ...prev, mode: mode ?? prev.mode }))
 
@@ -200,10 +275,11 @@ export const register: Register = on => {
   // The classic inputs carry this session's transcript_path, and Claude Code keeps every
   // session's transcript beside it — so the list is its sessions, not the mod's bookkeeping.
   on('classic.SessionStart', async ($, e, next) => {
-    const path = typeof e.transcript_path === 'string' ? e.transcript_path : ''
-    if (path !== '') {
-      transcript = path
-      const history = await readSessions($, path)
+    const named = typeof e.transcript_path === 'string' ? dirOf(e.transcript_path) : ''
+    if (named !== '') {
+      dir = named
+      await $.store.set(DIR, named).catch(() => undefined)
+      const history = await readSessions($, named)
       await update($, state, prev => ({ ...prev, history }))
     }
 
@@ -261,7 +337,7 @@ export const register: Register = on => {
     const [repo, turns, history] = await Promise.all([
       readRepo($),
       $.session.turns().catch(() => null),
-      transcript === '' ? Promise.resolve(null) : readSessions($, transcript),
+      dir === '' ? Promise.resolve(null) : readSessions($, dir),
     ])
     await update($, state, prev => ({
       ...prev,
@@ -275,7 +351,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
     const now = Date.now()
     const it = await read($, state)
     const columns = Math.max(24, e.props.bodyColumns ?? 32)
@@ -340,7 +416,7 @@ export const register: Register = on => {
           {it.mode !== null && <Text color="autoAccept"> · {modeLabel(it.mode)}</Text>}
         </Box>
 
-        <Text color="subtle">{rule}</Text>
+        <Text color="permission">{rule}</Text>
 
         {it.context === null ? (
           <Text color="subtle">ctx   waiting for the first response</Text>
@@ -364,7 +440,7 @@ export const register: Register = on => {
           {it.startedAt !== null && <Text color="subtle"> · {dur(now - it.startedAt)}</Text>}
         </Box>
 
-        <Text color="subtle">{rule}</Text>
+        <Text color="permission">{rule}</Text>
         {it.repo === null ? (
           <Text color="subtle">{it.isRepoChecked ? 'not a git repository' : 'reading git…'}</Text>
         ) : (
@@ -403,7 +479,7 @@ export const register: Register = on => {
 
         {it.todos.length > 0 && (
           <Box flexDirection="column">
-            <Text color="subtle">{rule}</Text>
+            <Text color="permission">{rule}</Text>
             {Head({ title: "PLAN", count: `${doneCount}/${it.todos.length}` })}
             {open.slice(0, listRoom + 1).map((todo, index) => (
               <Box key={`todo-${index}`}>
@@ -420,7 +496,7 @@ export const register: Register = on => {
 
         {it.agents.length > 0 && (
           <Box flexDirection="column">
-            <Text color="subtle">{rule}</Text>
+            <Text color="permission">{rule}</Text>
             {Head({ title: "AGENTS", count: it.agents.filter(one => one.ms === null).length })}
             {it.agents.slice(-3).map(agent => (
               <Box key={`agent-${agent.id}`}>
@@ -433,7 +509,7 @@ export const register: Register = on => {
           </Box>
         )}
 
-        <Text color="subtle">{rule}</Text>
+        <Text color="permission">{rule}</Text>
         {Head({ title: "ACTIVITY", count: it.activity.length })}
         {activity.length === 0 && <Text color="subtle">nothing yet</Text>}
         {activity.slice(0, listRoom).map(call => (
@@ -447,19 +523,33 @@ export const register: Register = on => {
           </Box>
         ))}
 
-        <Text color="subtle">{rule}</Text>
+        <Text color="permission">{rule}</Text>
         {Head({ title: "SESSIONS", count: it.history.length })}
         {it.history.length === 0 && <Text color="subtle">no transcripts found</Text>}
         {it.history.slice(0, 5).map(past => (
-          <Box key={`past-${past.id}`}>
+          <Box key={`past-row-${past.id}`}>
             <Text color={past.id === it.sessionId ? 'claude' : 'subtle'}>
               {(past.id === it.sessionId ? 'now' : ago(past.at, now)).padEnd(9)}
             </Text>
-            <Text color={past.id === it.sessionId ? 'text' : 'inactive'}>
-              {shortText(past.title, Math.max(6, columns - 10))}
-            </Text>
+            <Button
+              key={`past-${past.id}`}
+              plain
+              label={shortText(past.title, Math.max(6, columns - 11))}
+              onPress={async () => {
+                const command = resumeCommand(past.id)
+                const copied = await $.ui.copy({ text: command, surface: e.surface })
+                $.ui.toast(
+                  copied.isCopied
+                    ? `Copied: ${command}`
+                    : `Run in a new terminal: ${command}`,
+                )
+              }}
+            />
           </Box>
         ))}
+        {it.history.length > 0 && (
+          <Text color="subtle">press a session to copy its resume command</Text>
+        )}
       </Box>
     )
   })
