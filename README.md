@@ -39,7 +39,8 @@ pane follows whatever theme you run, custom ones included.
 
 ## The mascot
 
-Right above the input, at the right-hand edge, Claude's own mascot acts out what the
+Right above the input, at the right-hand edge, Claude's own mascot — given a second pair of
+arms — acts out what the
 session is doing, with what it is doing written underneath. Each subagent at work gets one
 of its own to its left, in its own colour, labelled with its task:
 

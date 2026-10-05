@@ -1208,3 +1208,15 @@ test('a failed tool call is drawn loud, with why; one that worked keeps its own 
   })
   expect(engineDrew).toBe(1)
 })
+
+test('the mascot has four arms: a pair at the head and a pair at the body', () => {
+  const [head, body] = spriteFor('idle', 1)
+  const isArm = (char: string | undefined) => ['▗', '▖', '▝', '▘'].includes(char ?? '')
+
+  for (const row of [head, body]) {
+    expect(isArm([...row][0])).toBe(true)
+    expect(isArm([...row].at(-1))).toBe(true)
+  }
+  // At work, the upper pair moves too.
+  expect(spriteFor('running', 0)[0]).not.toBe(spriteFor('running', 1)[0])
+})

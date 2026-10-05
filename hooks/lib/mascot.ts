@@ -19,8 +19,11 @@ export const activityOfTool = (tool: string): MascotActivity => {
   return 'thinking'
 }
 
-const HEAD = ' ▐▛███▜▌ '
-const BLINK = ' ▐▀███▀▌ '
+// Claude's own mascot, with a second pair of arms at the head's lower corners: four in all.
+const HEAD = '▗▐▛███▜▌▖'
+const BLINK = '▗▐▀███▀▌▖'
+/** The upper pair raised. */
+const HEAD_UP = '▝▐▛███▜▌▘'
 const BODY = '▝▜█████▛▘'
 const ARMS_UP = '▗▟█████▙▖'
 const WAVE_LEFT = '▗▟█████▛▘'
@@ -43,11 +46,11 @@ export const spriteFor = (activity: MascotActivity, frame: number): [string, str
     case 'running':
     case 'reading':
     case 'planning':
-      // Busy feet.
-      return [HEAD, BODY, even ? LEGS : STEP]
+      // Busy feet, and the upper arms going up and down with them.
+      return [even ? HEAD : HEAD_UP, BODY, even ? LEGS : STEP]
     case 'done':
-      // Arms up.
-      return [HEAD, even ? ARMS_UP : BODY, LEGS]
+      // All four arms up, and down, and up.
+      return even ? [HEAD_UP, ARMS_UP, LEGS] : [HEAD, BODY, LEGS]
     case 'waiting':
       // Waving for attention.
       return [HEAD, even ? WAVE_LEFT : WAVE_RIGHT, LEGS]
