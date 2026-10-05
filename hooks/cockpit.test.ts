@@ -11,7 +11,7 @@ import {
 import { isWindowsPath, launchCommands } from './lib/launch'
 import { effortLabel, withDefaults } from './register'
 import { heatOf, TOKYO } from './lib/palette'
-import { activityOfTool, describe as describeActivity, spriteFor } from './lib/mascot'
+import { aboutCall, activityOfTool, describe as describeActivity, spriteFor } from './lib/mascot'
 import type { MascotActivity } from './lib/mascot'
 import { subjectOf, todosOf } from './lib/tools'
 import {
@@ -1099,4 +1099,14 @@ test('the end of a turn is a line that is easy to find when scrolling back', asy
   })
 
   expect(await marker.find({ text: '✓ done in 3m 12s' })).toBeDefined()
+})
+
+test('a call is described by what it is: a file by its name, a command by itself', () => {
+  expect(aboutCall('Edit', 'C:/code/proj/src/parse.ts')).toBe('parse.ts')
+  expect(aboutCall('Bash', 'git show v99')).toBe('git show v99')
+  // Found in a live demo: the path-style shortening turned this into
+  // "claude-code-cockpit && git show v99".
+  expect(aboutCall('Bash', 'cd ~/Desktop/Code/claude-code-cockpit && git show v99')).toBe('git show v99')
+  expect(aboutCall('Bash', 'cd "C:/My Code/app"; npm test')).toBe('npm test')
+  expect(aboutCall('Bash', 'npm run build -- --out ./dist/app')).toBe('npm run build -- --out ./dist/app')
 })

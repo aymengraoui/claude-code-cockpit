@@ -25,7 +25,7 @@ import {
 } from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
 import { heatOf, TOKYO } from './lib/palette'
-import { activityOfTool, CHIME_AFTER_MS, describe, spriteFor } from './lib/mascot'
+import { aboutCall, activityOfTool, CHIME_AFTER_MS, describe, spriteFor } from './lib/mascot'
 import type { MascotActivity } from './lib/mascot'
 import { fromUsage } from './lib/usage'
 
@@ -372,9 +372,6 @@ const chime = ($: EngineInterface): void => {
   void $.audio.play({ asset: CHIME }).catch(() => undefined)
 }
 
-/** A path's last segment, which is what is worth a glance. */
-const baseOf = (path: string): string => toPosix(path).split('/').filter(one => one !== '').at(-1) ?? path
-
 /** The activities that are work in progress: the mascot moves for as long as they last. */
 const WORKING: ReadonlySet<MascotActivity> = new Set(['thinking', 'writing', 'running', 'reading', 'planning'])
 
@@ -641,7 +638,7 @@ export const register: Register = on => {
 
     // The main loop's calls are the mascot's; a subagent's walk under their own mascots.
     const isMain = (e as { agentId?: string }).agentId === undefined
-    const what = shortText(baseOf(subject), 40)
+    const what = shortText(aboutCall(e.tool, subject), 40)
     if (isMain && !isAgent) await act($, activityOfTool(e.tool), what === '' ? null : what)
 
     const startedAt = await $.clock.now()

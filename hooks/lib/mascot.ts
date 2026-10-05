@@ -86,5 +86,20 @@ export const describe = (activity: MascotActivity, detail: string | null): strin
   }
 }
 
+/**
+ * What a call is about, as the mascot's line says it: a file by its name, a command by
+ * itself — without a leading `cd <dir> &&`, which only says where it ran. Taking the part
+ * after the last slash suits a path and mangles a command, so the two are told apart.
+ */
+export const aboutCall = (tool: string, subject: string): string => {
+  if (tool !== 'Bash') {
+    const segments = subject.split(String.fromCharCode(92)).join('/').split('/').filter(one => one !== '')
+
+    return segments.at(-1) ?? subject
+  }
+
+  return subject.replace(/^\s*cd\s+("[^"]*"|'[^']*'|\S+)\s*(&&|;)\s*/, '').trim()
+}
+
 /** How long a turn must run before its end is worth a chime: attention drifts by then. */
 export const CHIME_AFTER_MS = 30_000
