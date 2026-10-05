@@ -902,12 +902,12 @@ const ALL_ACTIVITIES: MascotActivity[] = [
   'idle', 'thinking', 'writing', 'running', 'reading', 'planning', 'done', 'alert', 'waiting',
 ]
 
-test('every frame of every activity is two rows of seven columns', () => {
+test('every frame of every activity is two rows of five columns', () => {
   for (const activity of ALL_ACTIVITIES) {
     for (let frame = 0; frame < 24; frame += 1) {
       const rows = spriteFor(activity, frame)
       expect(rows.length).toBe(2)
-      for (const row of rows) expect([...row].length).toBe(7)
+      for (const row of rows) expect([...row].length).toBe(5)
     }
   }
 })
