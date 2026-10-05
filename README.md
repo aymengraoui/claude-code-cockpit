@@ -29,13 +29,40 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 │   fix the parser rounding          │
 │                                    │
 │ ────────────────────────────────── │
-│ compact · rewind · resume · clear  │
+│ new · compact · rewind · resume ·… │
 ╰────────────────────────────────────╯
 ```
 
 `●` marks a file this session wrote to, so your edits stand out from whatever else is dirty in
 the tree. Percentages go green → amber → red as they climb. Every color is a theme key, so the
 pane follows whatever theme you run, custom ones included.
+
+## The mascot
+
+Above the prompt, always in view, a small mascot acts out what the session is doing, with one
+line beside it saying the same in words:
+
+```
+ ▐▛███▜▌   running npm test                         ▐▛███▜▌   ▐▛███▜▌
+▝▜█████▛▘  2 agents working                         ▝▜█████▛▘ ▝▜█████▛▘
+  ▝▘ ▘▝                                               ▘▘ ▝▝    ▝▘ ▘▝
+                                                    find cal…  write t…
+```
+
+Each subagent at work gets a mascot of its own, in its own colour, labelled with its task.
+
+It is built for attention that drifts. **Motion means something is happening**: the mascot
+moves while work is under way, moves for a few seconds when something changes, then stands
+still — idle never moves. **Colour says whose turn it is**: green when done (`✓ done — your
+turn`), red when a step failed (`⚠ failed 1 step: npm test`, kept on show until the next
+prompt), yellow when the session is waiting on you (`⏳ needs you: …`, from a permission prompt).
+
+A soft chime plays when the session needs you, and when a turn that ran longer than 30
+seconds ends — the moments attention has most likely wandered — with a toast to match. Short
+turns stay quiet. In the transcript, the end of each turn is a loud green
+`━━━ ✓ done in 3m 12s ━━━` line, so the start of each answer is easy to find when scrolling.
+
+Nothing is hidden or rewritten: everything Claude Code shows, it still shows.
 
 ## Install
 
@@ -109,11 +136,11 @@ is cut, and says how much was left out.
 counts, largest first, deferred tool schemas left out since they cost nothing until loaded —
 with `compact` waiting in the toolbar below.
 
-**The quick actions sit in a toolbar pinned to the bottom edge** — `compact · rewind ·
+**The quick actions sit in a toolbar pinned to the bottom edge** — `new · compact · rewind ·
 resume · clear` — so they never scroll away with the content above:
 the pane is drawn exactly as tall as its body, the content growing into what is left and
 clipped there. Each quick action runs the engine's own command; `compact` shows a `⚠` past
-85% context. `clear` discards the conversation, so it asks twice: the first
+85% context. `new` opens a fresh `claude` in a terminal of its own, in the same directory. `clear` discards the conversation, so it asks twice: the first
 press arms it and shows `clear?`, a second within four seconds runs it.
 
 **The repository follows the work.** A session started in a home directory still works in a

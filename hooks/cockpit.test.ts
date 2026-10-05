@@ -11,12 +11,15 @@ import {
 import { isWindowsPath, launchCommands } from './lib/launch'
 import { effortLabel, withDefaults } from './register'
 import { heatOf, TOKYO } from './lib/palette'
+import { activityOfTool, describe as describeActivity, spriteFor } from './lib/mascot'
+import type { MascotActivity } from './lib/mascot'
 import { subjectOf, todosOf } from './lib/tools'
 import {
   bar,
   kilo,
   footerMode,
   modelLabel,
+  spoken,
   shortPath,
   shortText,
   titleOf,
@@ -415,12 +418,12 @@ test('a press with no terminal to be had still leaves the command on the clipboa
 })
 
 test('a terminal is tried per platform, the window before a console', () => {
-  const windows = launchCommands('abc', 'C:/repo', true)
+  const windows = launchCommands('claude --resume abc', 'C:/repo', true)
   expect(windows[0]?.[0]).toBe('wt.exe')
   expect(windows[0]).toContain('claude --resume abc')
   expect(windows[1]?.[0]).toBe('cmd.exe')
 
-  const posix = launchCommands('abc', '/repo', false)
+  const posix = launchCommands('claude', '/repo', false)
   expect(posix[0]?.[0]).toBe('osascript')
   expect(posix.map(one => one[0])).toContain('gnome-terminal')
 })
@@ -477,7 +480,10 @@ test('pressing a session opens it in a new terminal', async ($, on) => {
 
 const startPane = async ($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<Parameters<typeof test>[1]>[1]) => {
   on('clock.now', () => ({ value: Date.now() }))
-  on('clock.sleep', () => ({ value: undefined }))
+  // Time does not pass here: the tick and the mascot's loop end at their first sleep.
+  on('clock.sleep', () => {
+    throw new Error('no time passes in this test')
+  })
   on('ui.panes', () => ({ value: [] }))
   on('command.register', () => ({ value: undefined }))
   on('config.list', () => ({ value: MODEL_ROW }))
@@ -646,7 +652,9 @@ const startOutsideRepo = async (
 ) => {
   const ran: string[][] = []
   on('clock.now', () => ({ value: Date.now() }))
-  on('clock.sleep', () => ({ value: undefined }))
+  on('clock.sleep', () => {
+    throw new Error('no time passes in this test')
+  })
   on('ui.panes', () => ({ value: [] }))
   on('command.register', () => ({ value: undefined }))
   on('config.list', () => ({ value: MODEL_ROW }))
@@ -887,4 +895,202 @@ test('the content keeps a gutter from the edge that resizes the pane', async ($,
   // The gutter is taken out of the width, so a rule still fits on one line.
   const rule = JSON.stringify(root).match(/"(─+)"/)?.[1] ?? ''
   expect(rule.length).toBe(PANE_PROPS.bodyColumns - 2)
+})
+
+const ALL_ACTIVITIES: MascotActivity[] = [
+  'idle', 'thinking', 'writing', 'running', 'reading', 'planning', 'done', 'alert', 'waiting',
+]
+
+test('every frame of every activity is three rows of nine columns', () => {
+  for (const activity of ALL_ACTIVITIES) {
+    for (let frame = 0; frame < 24; frame += 1) {
+      const rows = spriteFor(activity, frame)
+      expect(rows.length).toBe(3)
+      for (const row of rows) expect([...row].length).toBe(9)
+    }
+  }
+})
+
+test('the mascot moves differently for each kind of moment', () => {
+  // Idle blinks now and then; a failure shakes; done throws its arms up.
+  expect(spriteFor('idle', 0)[0]).not.toBe(spriteFor('idle', 1)[0])
+  expect(spriteFor('alert', 0)).not.toEqual(spriteFor('alert', 1))
+  expect(spriteFor('done', 0)[1]).not.toBe(spriteFor('done', 1)[1])
+  expect(spriteFor('waiting', 0)[1]).not.toBe(spriteFor('waiting', 1)[1])
+})
+
+test('a tool reads as what the mascot is doing, and that reads as plain words', () => {
+  expect(activityOfTool('Edit')).toBe('writing')
+  expect(activityOfTool('Bash')).toBe('running')
+  expect(activityOfTool('Grep')).toBe('reading')
+  expect(activityOfTool('TodoWrite')).toBe('planning')
+  expect(activityOfTool('SomethingElse')).toBe('thinking')
+
+  expect(describeActivity('running', 'npm test')).toBe('running npm test')
+  expect(describeActivity('done', null)).toBe('✓ done — your turn')
+  expect(describeActivity('waiting', 'approve Bash')).toBe('⏳ needs you: approve Bash')
+  expect(describeActivity('alert', 'npm test')).toBe('⚠ failed npm test')
+})
+
+test('a turn length reads the way people say it', () => {
+  expect(spoken(45000)).toBe('45s')
+  expect(spoken(192000)).toBe('3m 12s')
+  expect(spoken(3840000)).toBe('1h 04m')
+})
+
+const BAND_PROPS = {
+  hasSurvey: false,
+  isWorking: false,
+  maxRows: 6,
+  bodyColumns: 100,
+  scroll: { offset: 0, bodyRows: 6 },
+  view: {},
+}
+
+/** A session with a clock the test moves, and the band mounted over it. */
+const startBand = async (
+  $: Parameters<Parameters<typeof test>[1]>[0],
+  on: Parameters<Parameters<typeof test>[1]>[1],
+  clock: { now: number },
+) => {
+  const sounds: string[] = []
+  const toasts: string[] = []
+  on('clock.now', () => ({ value: clock.now }))
+  on('clock.sleep', () => {
+    throw new Error('no time passes in this test')
+  })
+  on('audio.play', (_$, e) => {
+    sounds.push((e as { clip?: { asset?: string } }).clip?.asset ?? '')
+
+    return { value: undefined }
+  })
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
+  on('classic.UserPromptSubmit', () => ({}))
+  on('classic.Notification', () => ({}))
+  on('turn.complete', () => ({ text: 'done', reason: 'end_turn' }))
+  on('tool.call', (_$, e) =>
+    e.tool === 'Bash' && (e.input as { command?: string }).command === 'npm test'
+      ? { result: {}, text: 'tests failed', isError: true }
+      : { result: {}, text: 'ok', isError: false },
+  )
+
+  const band = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: BAND_PROPS,
+  })
+
+  return { band, sounds, toasts }
+}
+
+test('the band says what is happening, and whose turn it is', async ($, on) => {
+  const clock = { now: 1_000_000 }
+  const { band } = await startBand($, on, clock)
+  expect(await band.find({ text: 'ready' })).toBeDefined()
+
+  await $.classic.UserPromptSubmit({ prompt: 'fix it', permission_mode: 'auto' })
+  expect(await band.find({ text: 'thinking…' })).toBeDefined()
+
+  await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
+  expect(await band.find({ text: '✓ done — your turn' })).toBeDefined()
+})
+
+test('a failed step is still on show when the turn ends', async ($, on) => {
+  const { band } = await startBand($, on, { now: 1_000_000 })
+
+  await $.classic.UserPromptSubmit({ prompt: 'test it', permission_mode: 'auto' })
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', input: { command: 'npm test' } })
+  await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
+
+  expect(await band.find({ text: /⚠ failed 1 step: npm test/ })).toBeDefined()
+})
+
+test('a wait on the person is the loudest thing there is', async ($, on) => {
+  const { band, sounds } = await startBand($, on, { now: 1_000_000 })
+
+  await $.classic.Notification({
+    message: 'Claude needs your permission to use Bash',
+    notification_type: 'permission_prompt',
+  })
+
+  expect(await band.find({ text: /⏳ needs you: Claude needs your permission/ })).toBeDefined()
+  expect(sounds).toEqual(['sounds/chime.wav'])
+})
+
+test('a long turn ends with a chime and a toast; a short one stays quiet', async ($, on) => {
+  const clock = { now: 1_000_000 }
+  const { sounds, toasts } = await startBand($, on, clock)
+
+  await $.classic.UserPromptSubmit({ prompt: 'quick', permission_mode: 'auto' })
+  clock.now += 5_000
+  await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
+  expect(sounds).toEqual([])
+
+  await $.classic.UserPromptSubmit({ prompt: 'long', permission_mode: 'auto' })
+  clock.now += 95_000
+  await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't2', reason: 'end_turn' } as never)
+  expect(sounds).toEqual(['sounds/chime.wav'])
+  expect(toasts.join(' ')).toContain('✓ Done — your turn')
+})
+
+test('a subagent at work gets a mascot of its own', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('clock.sleep', () => {
+    throw new Error('no time passes in this test')
+  })
+  on('tool.call', async () => {
+    await held
+
+    return { result: {}, text: 'ok', isError: false }
+  })
+
+  const running = $.tool.call({
+    tool: 'Agent',
+    tool_use_id: 'a1',
+    input: { description: 'find callers', prompt: 'find them' },
+  })
+  // Let the call get as far as the subagent running: recorded, not yet returned.
+  await new Promise(resolve => setTimeout(resolve, 40))
+
+  const band = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: BAND_PROPS,
+  })
+  expect(await band.find({ text: '1 agent working' })).toBeDefined()
+
+  release()
+  await running
+})
+
+test('new opens a fresh claude in a terminal of its own', async ($, on) => {
+  const { ui, ran } = await startOutsideRepo($, on)
+
+  await ui.press({ key: 'action-new' })
+
+  const launch = ran.find(argv => argv[0] === 'wt.exe')
+  expect(launch).toBeDefined()
+  expect(launch).toContain('claude')
+  expect(launch?.join(' ')).not.toContain('--resume')
+})
+
+test('the end of a turn is a line that is easy to find when scrolling back', async ($, on) => {
+  const marker = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'TurnDuration',
+    props: { word: 'Baked', durationMs: 192000 },
+  })
+
+  expect(await marker.find({ text: '✓ done in 3m 12s' })).toBeDefined()
 })

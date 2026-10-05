@@ -99,8 +99,33 @@ export type Cockpit = {
   armed: { action: string; at: number } | null
 }
 
+/** What the mascot acts out. */
+export type MascotActivity =
+  | 'idle'
+  | 'thinking'
+  | 'writing'
+  | 'running'
+  | 'reading'
+  | 'planning'
+  | 'done'
+  | 'alert'
+  | 'waiting'
+
+/** What the session is doing, as the mascot above the prompt acts it out. */
+export type MascotState = {
+  activity: MascotActivity
+  /** The file, the command, or the message the activity is about. */
+  detail: string | null
+  /** The animation's frame; the band redraws on each. */
+  frame: number
+  /** Tools that failed this turn, by what they were doing. */
+  failures: string[]
+  /** When the running turn began, to tell a long turn from a short one. */
+  turnStartedAt: number | null
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    cockpit: { state: Cockpit }
+    cockpit: { state: Cockpit; mascot: MascotState }
   }
 }

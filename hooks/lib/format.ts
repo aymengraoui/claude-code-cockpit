@@ -85,6 +85,16 @@ const FOOTER_MODES: Readonly<Record<string, string>> = {
 /** A permission mode as the footer words it; a mode it does not know, as reported. */
 export const footerMode = (mode: string): string => FOOTER_MODES[mode] ?? mode
 
+/** A turn's length as people say it: `45s`, `3m 12s`, `1h 04m`. */
+export const spoken = (ms: number): string => {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
+
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
+}
+
 /** A prompt reduced to one short line, to title a session in the history list. */
 export const titleOf = (text: string, max = 64): string => {
   const line = text.replace(/\s+/g, ' ').trim()

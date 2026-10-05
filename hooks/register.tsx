@@ -1,12 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Activity, Cockpit, ContextRow, OpenDiff, Past, Repo, Todo } from '../types'
+import type { Activity, Cockpit, ContextRow, MascotState, OpenDiff, Past, Repo, Todo } from '../types'
 import {
   bar,
   kilo,
   footerMode,
   modelLabel,
+  spoken,
   shortPath,
   shortText,
   toPosix,
@@ -24,6 +25,8 @@ import {
 } from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
 import { heatOf, TOKYO } from './lib/palette'
+import { activityOfTool, CHIME_AFTER_MS, describe, spriteFor } from './lib/mascot'
+import type { MascotActivity } from './lib/mascot'
 import { fromUsage } from './lib/usage'
 
 const PANE = 'cockpit'
@@ -40,7 +43,17 @@ const ARM_MS = 4000
 /** Columns of space between the pane's edge — the line that resizes it — and the content. */
 const GUTTER = 2
 /** The quick actions, each the engine's own command; the one that discards comes last. */
-const QUICK_ACTIONS = ['compact', 'rewind', 'resume', 'clear'] as const
+const QUICK_ACTIONS = ['new', 'compact', 'rewind', 'resume', 'clear'] as const
+/** How fast the mascot moves: a frame every this many milliseconds. */
+const FRAME_MS = 280
+/** Frames a finished, failed or waiting mascot keeps moving before it settles: about ten seconds. */
+const SETTLE_FRAMES = 36
+/** A safety for one long step: past this many frames with nothing changing, the mascot rests. */
+const MAX_FRAMES = 2000
+/** Colours the subagents' mascots take in turn, so each is told apart at a glance. */
+const AGENT_COLOURS = [TOKYO.blue, TOKYO.green, TOKYO.yellow, TOKYO.cyan, TOKYO.orange, TOKYO.red]
+/** The chime, a file of the plugin's own. */
+const CHIME = 'sounds/chime.wav'
 /** Context fill at which compacting is offered as the thing to do next. */
 const COMPACT_AT = 85
 /** Colours the context breakdown's rows take in turn. */
@@ -73,6 +86,24 @@ const EMPTY: Cockpit = {
 }
 
 const state = atom({ plugin: 'cockpit', key: 'state' } as const, EMPTY)
+
+const MASCOT_IDLE: MascotState = {
+  activity: 'idle',
+  detail: null,
+  frame: 0,
+  failures: [],
+  turnStartedAt: null,
+}
+
+/** The mascot's own slot, so its frames redraw the band and nothing else. */
+const mascot = atom({ plugin: 'cockpit', key: 'mascot' } as const, MASCOT_IDLE)
+
+/** The mascot's state with every field present, as `withDefaults` is for the pane's. */
+export const mascotDefaults = (stored: Partial<MascotState> | null | undefined): MascotState => ({
+  ...MASCOT_IDLE,
+  ...(stored ?? {}),
+  failures: Array.isArray(stored?.failures) ? stored.failures : [],
+})
 
 /**
  * The state with every field present, whatever version wrote it.
@@ -242,6 +273,12 @@ const readContextRows = async ($: EngineInterface): Promise<ContextRow[]> => {
  * first press arms it and says so, a second within a few seconds runs it.
  */
 const pressAction = async ($: EngineInterface, action: string): Promise<void> => {
+  if (action === 'new') {
+    const it = withDefaults(await read($, state))
+    await openSession($, null, it.cwd ?? '.', 'terminal')
+
+    return
+  }
   if (action === 'clear') {
     const { armed } = withDefaults(await read($, state))
     const now = Date.now()
@@ -275,19 +312,20 @@ const rememberedDir = async ($: EngineInterface): Promise<string> => {
  */
 const openSession = async (
   $: EngineInterface,
-  id: string,
+  id: string | null,
   cwd: string,
   surface: 'terminal' | 'desktop' | 'vscode' | 'mobile',
 ): Promise<void> => {
-  const command = resumeCommand(id)
+  // No id: a session of its own, in the same directory.
+  const command = id === null ? 'claude' : resumeCommand(id)
   // The transcript's path always says which platform this is; a cwd may not be known yet.
   const isWindows = isWindowsPath(transcriptPath === '' ? cwd : transcriptPath)
 
-  for (const argv of launchCommands(id, cwd, isWindows)) {
+  for (const argv of launchCommands(command, cwd, isWindows)) {
     try {
       const ran = await $.process.run(argv)
       if (ran.exitCode === 0) {
-        $.ui.toast(`Opening ${id.slice(0, 8)} in a new terminal`)
+        $.ui.toast(id === null ? 'Opening a new session' : `Opening ${id.slice(0, 8)} in a new terminal`)
 
         return
       }
@@ -323,6 +361,77 @@ export const effortLabel = (level: string): string =>
 
 /** This session's transcript, which says which platform this is. */
 let transcriptPath = ''
+
+/** Set what the mascot is doing. */
+const act = async ($: EngineInterface, activity: MascotActivity, detail: string | null): Promise<void> => {
+  await moveMascot($, value => ({ ...value, activity, detail }))
+}
+
+/** The chime: once, softly, and never a failure if the sound cannot play. */
+const chime = ($: EngineInterface): void => {
+  void $.audio.play({ asset: CHIME }).catch(() => undefined)
+}
+
+/** A path's last segment, which is what is worth a glance. */
+const baseOf = (path: string): string => toPosix(path).split('/').filter(one => one !== '').at(-1) ?? path
+
+/** The activities that are work in progress: the mascot moves for as long as they last. */
+const WORKING: ReadonlySet<MascotActivity> = new Set(['thinking', 'writing', 'running', 'reading', 'planning'])
+
+/** One animation loop at a time. */
+let isAnimating = false
+
+/**
+ * The mascot's heartbeat, which redraws the band alone. Motion is information here, not
+ * decoration: the mascot moves while work is under way, moves for a few seconds when
+ * something changes — done, failed, needs you — and then stands still, its colour and
+ * its words saying the rest. Idle never moves. So the loop ends by itself, and any change
+ * of activity starts it again. Like the pane's tick, nothing in it may reject.
+ */
+const startAnimating = ($: EngineInterface): void => {
+  if (isAnimating) return
+  isAnimating = true
+
+  void (async () => {
+    try {
+      let last: MascotActivity | null = null
+      let still = 0
+      for (;;) {
+        const slept = await $.clock
+          .sleep(FRAME_MS)
+          .then(() => true)
+          .catch(() => false)
+        if (!slept) break
+
+        const now = mascotDefaults(await read($, mascot).catch(() => null))
+        if (now.activity === last) still += 1
+        else {
+          last = now.activity
+          still = 0
+        }
+        const limit = WORKING.has(now.activity) ? MAX_FRAMES : now.activity === 'idle' ? 0 : SETTLE_FRAMES
+        if (still >= limit) break
+
+        const isOk = await update($, mascot, prev => {
+          const value = mascotDefaults(prev)
+
+          return { ...value, frame: (value.frame + 1) % 1200 }
+        })
+          .then(() => true)
+          .catch(() => false)
+        if (!isOk) break
+      }
+    } finally {
+      isAnimating = false
+    }
+  })()
+}
+
+/** Change the mascot, and let it move to show it. */
+const moveMascot = async ($: EngineInterface, change: (value: MascotState) => MascotState): Promise<void> => {
+  await update($, mascot, prev => change(mascotDefaults(prev)))
+  startAnimating($)
+}
 
 /** One ticker at a time, however many times the pane is opened. */
 let isTicking = false
@@ -428,6 +537,14 @@ export const register: Register = on => {
   // The permission mode reaches a mod only through the classic hook inputs, which carry
   // it on every prompt and every tool result — so it is read, never asked for.
   on('classic.UserPromptSubmit', async ($, e, next) => {
+    const startedAt = await $.clock.now()
+    await moveMascot($, value => ({
+      ...value,
+      activity: 'thinking',
+      detail: null,
+      failures: [],
+      turnStartedAt: startedAt,
+    }))
     if (typeof e.permission_mode === 'string') {
       const mode = e.permission_mode
       await update($, state, prev => ({ ...prev, mode }))
@@ -440,6 +557,15 @@ export const register: Register = on => {
         await $.store.set(DIR, named).catch(() => undefined)
       }
     }
+
+    return next(e)
+  })
+
+  // A permission prompt or an idle wait: the one moment the session cannot go on without you.
+  on('classic.Notification', async ($, e, next) => {
+    const message = typeof e.message === 'string' ? e.message : null
+    await act($, 'waiting', message === null ? null : shortText(message, 60))
+    chime($)
 
     return next(e)
   })
@@ -513,9 +639,28 @@ export const register: Register = on => {
       await followRepo($, toPosix(subject))
     }
 
+    // The main loop's calls are the mascot's; a subagent's walk under their own mascots.
+    const isMain = (e as { agentId?: string }).agentId === undefined
+    const what = shortText(baseOf(subject), 40)
+    if (isMain && !isAgent) await act($, activityOfTool(e.tool), what === '' ? null : what)
+
     const startedAt = await $.clock.now()
     const result = await next(e)
     const done = { ms: (await $.clock.now()) - startedAt, isError: result.isError === true }
+
+    if (isMain && !isAgent) {
+      if (done.isError) {
+        const failed = what === '' ? e.tool : what
+        await moveMascot($, value => ({
+          ...value,
+          activity: 'alert',
+          detail: failed,
+          failures: [...value.failures, failed],
+        }))
+      } else {
+        await act($, 'thinking', null)
+      }
+    }
 
     if (isAgent) {
       await update($, state, prev => ({
@@ -529,6 +674,27 @@ export const register: Register = on => {
 
   // The working tree is re-read between turns, not per edit: one pair of git calls a turn.
   on('turn.complete', async ($, e, next) => {
+    // A subagent's turn ending says nothing about the main one.
+    if ((e as { agentId?: string }).agentId === undefined) {
+      const now = await $.clock.now()
+      const was = mascotDefaults(await read($, mascot))
+      const isLong = was.turnStartedAt !== null && now - was.turnStartedAt >= CHIME_AFTER_MS
+      const failed = was.failures.length
+
+      await moveMascot($, value => ({
+        ...value,
+        activity: failed > 0 ? 'alert' : 'done',
+        detail: failed > 0 ? `${failed} ${failed === 1 ? 'step' : 'steps'}: ${was.failures.join(', ')}` : null,
+        turnStartedAt: null,
+      }))
+
+      // Attention drifts during a long turn: say it is over, out loud and on screen.
+      if (isLong) {
+        chime($)
+        $.ui.toast(failed > 0 ? `⚠ Finished, ${failed} failed — your turn` : '✓ Done — your turn')
+      }
+    }
+
     const [repo, turns, history] = await Promise.all([
       readRepo($),
       $.session.turns().catch(() => null),
@@ -803,6 +969,96 @@ export const register: Register = on => {
             </Box>
           ))}
         </Box>
+      </Box>
+    )
+  })
+
+  // The band above the prompt: the mascot, what it is doing in words, and a mascot of its
+  // own for every subagent at work. It yields to the engine's surveys, which draw there.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
+
+    const { Box, Text } = $.ui.resolve(e)
+    const m = mascotDefaults(await read($, mascot))
+    const it = withDefaults(await read($, state))
+    const agents = it.agents.filter(one => one.ms === null).slice(0, 4)
+    const extra = it.agents.filter(one => one.ms === null).length - agents.length
+
+    const colour =
+      m.activity === 'alert'
+        ? TOKYO.red
+        : m.activity === 'waiting'
+          ? TOKYO.yellow
+          : m.activity === 'done'
+            ? TOKYO.green
+            : TOKYO.accent
+    const line = describe(m.activity, m.detail)
+    const under =
+      agents.length > 0
+        ? `${agents.length + extra} ${agents.length + extra === 1 ? 'agent' : 'agents'} working`
+        : m.activity === 'waiting'
+          ? 'the session is paused until you answer'
+          : m.activity === 'done'
+            ? 'nothing is running'
+            : ''
+
+    // Too little room for the sprite: the words alone, still coloured.
+    if (e.props.maxRows < 3) {
+      return (
+        <Box>
+          <Text color={colour} bold>
+            {line}
+          </Text>
+        </Box>
+      )
+    }
+
+    return (
+      <Box>
+        <Box flexDirection="column">
+          {spriteFor(m.activity, m.frame).map((row, index) => (
+            <Box key={`me-${index}`}>
+              <Text color={colour}>{row}</Text>
+            </Box>
+          ))}
+        </Box>
+        <Box flexDirection="column" marginLeft={1}>
+          <Text color={colour} bold>
+            {shortText(line, Math.max(12, e.props.bodyColumns - 12 - agents.length * 11))}
+          </Text>
+          {under !== '' && <Text color={TOKYO.dim}>{under}</Text>}
+        </Box>
+        {agents.map((agent, index) => (
+          <Box key={`agent-mascot-${agent.id}`} flexDirection="column" marginLeft={2}>
+            {spriteFor('running', m.frame + index * 3).map((row, rowIndex) => (
+              <Box key={`agent-${agent.id}-${rowIndex}`}>
+                <Text color={AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue}>{row}</Text>
+              </Box>
+            ))}
+            {e.props.maxRows >= 4 && (
+              <Text color={AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue}>
+                {shortText(agent.subject, 9)}
+              </Text>
+            )}
+          </Box>
+        ))}
+        {extra > 0 && <Text color={TOKYO.dim}> +{extra}</Text>}
+      </Box>
+    )
+  })
+
+  // The end of each turn, made easy to find when scrolling back: a loud line in place of
+  // the engine's quiet "Baked for 3m 12s".
+  on('ui.render', { component: 'TurnDuration' }, ($, e) => {
+    const { Box, Text } = $.ui.resolve(e)
+
+    return (
+      <Box>
+        <Text color={TOKYO.line}>{'━━━ '}</Text>
+        <Text color={TOKYO.green} bold>
+          ✓ done in {spoken(e.props.durationMs)}
+        </Text>
+        <Text color={TOKYO.line}>{' ━━━'}</Text>
       </Box>
     )
   })

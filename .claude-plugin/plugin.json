@@ -1,7 +1,7 @@
 {
   "name": "cockpit",
-  "version": "0.17.2",
-  "description": "A sidebar for Claude Code in the terminal: usage, cost, branch, the working tree, tool activity and running agents, all beside the conversation.",
+  "version": "0.18.0",
+  "description": "A sidebar and a mascot for Claude Code in the terminal: usage, branch, diffs, sessions, and an always-visible line that says what is happening and whose turn it is.",
   "author": {
     "name": "Aymen Graoui",
     "url": "https://github.com/aymengraoui"

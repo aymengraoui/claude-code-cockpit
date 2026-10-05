@@ -4,18 +4,18 @@
 export const isWindowsPath = (path: string): boolean => /^[A-Za-z]:/.test(path)
 
 /**
- * The commands to try, in order, to open `claude --resume <id>` in a new terminal.
+ * The commands to try, in order, to run `command` — `claude`, `claude --resume <id>` — in a
+ * new terminal.
  *
  * Every entry is a plain argv, so nothing is shell-quoted and nothing is guessed about
  * the shell. The caller runs them until one exits cleanly, and copies the command to the
  * clipboard when none does — a terminal that is not there must not lose the click.
  */
 export const launchCommands = (
-  id: string,
+  command: string,
   cwd: string,
   isWindows: boolean,
 ): readonly string[][] => {
-  const command = `claude --resume ${id}`
 
   if (isWindows) {
     return [
