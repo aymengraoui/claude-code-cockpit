@@ -877,3 +877,14 @@ test('the diff view keeps its way back at the bottom too', async ($, on) => {
   const children = childrenOf(await ui.drawn())
   expect(JSON.stringify(children.at(-1))).toContain('"key":"diff-close"')
 })
+
+test('the content keeps a gutter from the edge that resizes the pane', async ($, on) => {
+  const ui = await startPane($, on)
+  const root = (await ui.drawn()) as { props?: { paddingLeft?: number } }
+
+  expect(root.props?.paddingLeft).toBe(2)
+
+  // The gutter is taken out of the width, so a rule still fits on one line.
+  const rule = JSON.stringify(root).match(/"(─+)"/)?.[1] ?? ''
+  expect(rule.length).toBe(PANE_PROPS.bodyColumns - 2)
+})

@@ -37,6 +37,8 @@ const SESSIONS_LISTED = 8
 const REPO = 'cockpit.repoDir'
 /** How long a press that wants confirming stays armed. */
 const ARM_MS = 4000
+/** Columns of space between the pane's edge — the line that resizes it — and the content. */
+const GUTTER = 2
 /** The quick actions, each the engine's own command; the one that discards comes last. */
 const QUICK_ACTIONS = ['compact', 'rewind', 'resume', 'clear'] as const
 /** Context fill at which compacting is offered as the thing to do next. */
@@ -547,7 +549,8 @@ export const register: Register = on => {
     const { Box, Button, Code, Text } = $.ui.resolve(e)
     const now = Date.now()
     const it = withDefaults(await read($, state))
-    const columns = Math.max(24, e.props.bodyColumns ?? 32)
+    // The gutter comes out of the width, so every row and rule still fits on one line.
+    const columns = Math.max(24, (e.props.bodyColumns ?? 32) - GUTTER)
     const rows = Math.max(8, e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 24)
 
     const changes = it.repo?.changes ?? []
@@ -607,7 +610,7 @@ export const register: Register = on => {
       const { path, source, format } = it.diff
 
       return (
-        <Box flexDirection="column" height={rows}>
+        <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
           <Box flexDirection="column" flexGrow={1} overflow="hidden">
             <Text color={TOKYO.text}>{shortPath(path, Math.max(8, columns))}</Text>
             <Text color={TOKYO.line}>{rule}</Text>
@@ -625,7 +628,7 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="column" height={rows}>
+      <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
         <Box flexDirection="column" flexGrow={1} overflow="hidden">
           <Box>
             <Text color={TOKYO.text} bold>
