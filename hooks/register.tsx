@@ -44,7 +44,8 @@ const ARM_MS = 4000
 /** Columns of space between the pane's edge — the line that resizes it — and the content. */
 const GUTTER = 2
 /** The quick actions, each the engine's own command; the one that discards comes last. */
-const QUICK_ACTIONS = ['new', 'compact', 'rewind', 'resume', 'clear'] as const
+/** The quick actions under the new-session button, each the engine's own command; the one that discards comes last. */
+const QUICK_ACTIONS = ['compact', 'rewind', 'resume', 'clear'] as const
 /** How fast the mascot moves: a frame every this many milliseconds. */
 const FRAME_MS = 280
 /** Frames a finished, failed or waiting mascot keeps moving before it settles: about ten seconds. */
@@ -1003,6 +1004,13 @@ export const register: Register = on => {
         </Box>
 
         <Text color={TOKYO.line}>{rule}</Text>
+        {/* A row of its own, labelled in full, so it is found without being looked for. */}
+        <Button
+          key="action-new"
+          plain
+          label="+ new session"
+          onPress={() => pressAction($, 'new')}
+        />
         <Box>
           {QUICK_ACTIONS.map((action, index) => (
             <Box key={`action-row-${action}`}>

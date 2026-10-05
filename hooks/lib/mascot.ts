@@ -19,6 +19,21 @@ export const activityOfTool = (tool: string): MascotActivity => {
   return 'thinking'
 }
 
+// Claude's default mascot, at its default size — three rows of nine columns, as Claude
+// Code draws it on its welcome screen — kept here for reference:
+//
+//      ▐▛███▜▌
+//     ▝▜█████▛▘
+//       ▘▘ ▝▝
+//
+// and with the second pair of arms this mod gives it, still at that size:
+//
+//     ▗▐▛███▜▌▖
+//     ▝▜█████▛▘
+//       ▘▘ ▝▝
+//
+// What the band draws is the smaller one below.
+//
 // Claude's own mascot at half size, four arms and all: two rows of five columns. Halving
 // it by sampling loses the eyes and the arms, which are single quarter-blocks, so this is
 // redrawn at the smaller size, keeping what makes it the mascot — the ▛ ▜ eyes, the solid

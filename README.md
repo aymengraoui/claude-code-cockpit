@@ -29,7 +29,8 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 │   fix the parser rounding          │
 │                                    │
 │ ────────────────────────────────── │
-│ new · compact · rewind · resume ·… │
+│ + new session                      │
+│ compact · rewind · resume · clear  │
 ╰────────────────────────────────────╯
 ```
 
@@ -144,11 +145,11 @@ is cut, and says how much was left out.
 counts, largest first, deferred tool schemas left out since they cost nothing until loaded —
 with `compact` waiting in the toolbar below.
 
-**The quick actions sit in a toolbar pinned to the bottom edge** — `new · compact · rewind ·
-resume · clear` — so they never scroll away with the content above:
+**The quick actions sit in a toolbar pinned to the bottom edge** — `+ new session` on a row of
+its own, then `compact · rewind · resume · clear` — so they never scroll away with the content above:
 the pane is drawn exactly as tall as its body, the content growing into what is left and
 clipped there. Each quick action runs the engine's own command; `compact` shows a `⚠` past
-85% context. `new` opens a fresh `claude` in a terminal of its own, in the same directory. `clear` discards the conversation, so it asks twice: the first
+85% context. `+ new session` opens a fresh `claude` in a terminal of its own, in the same directory. `clear` discards the conversation, so it asks twice: the first
 press arms it and shows `clear?`, a second within four seconds runs it.
 
 **The repository follows the work.** A session started in a home directory still works in a

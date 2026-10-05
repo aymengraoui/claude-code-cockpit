@@ -858,12 +858,15 @@ test('the model and effort lead the pane; the quick actions are pinned to its bo
   // something that scrolls away with the content above it.
   expect(root.props?.height).toBe(PANE_PROPS.scroll.bodyRows)
 
-  const [content, , actions] = childrenOf(root)
+  const [content, , newSession, actions] = childrenOf(root)
   expect((content as { props?: { flexGrow?: number } }).props?.flexGrow).toBe(1)
   expect(JSON.stringify(content)).toContain('"key":"model"')
   expect(JSON.stringify(content)).toContain('"key":"effort"')
+  // The new-session button has a row of its own, labelled in full; the rest share one.
+  expect(JSON.stringify(newSession)).toContain('"label":"+ new session"')
   expect(JSON.stringify(actions)).toContain('"key":"action-compact"')
   expect(JSON.stringify(actions)).toContain('"key":"action-clear"')
+  expect(JSON.stringify(actions)).not.toContain('"key":"action-new"')
   expect(JSON.stringify(content)).not.toContain('"key":"action-')
 })
 
