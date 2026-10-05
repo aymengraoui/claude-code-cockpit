@@ -19,26 +19,28 @@ export const activityOfTool = (tool: string): MascotActivity => {
   return 'thinking'
 }
 
-// Two rows, seven columns, four arms: the corners of each row are the arms, the middle
-// the head (its eyes) and the body. Every frame keeps that size.
+// Two rows, seven columns, four arms: a dash at each end of each row is an arm, the middle
+// the head (its eyes) and the body. An arm is stretched out, or pulled in to the half of the
+// cell against the body — still a dash, so the arms can move. Every frame keeps that size.
 const EYES = '▐▛█▜▌'
 const BLINK = '▐▀█▀▌'
 const BODY = '▜███▛'
 
-/** Arms as the corner marks of a row: down-and-out, or raised. */
-const LEFT_DOWN = '▗'
-const LEFT_OUT = '▝'
-const RIGHT_DOWN = '▖'
-const RIGHT_OUT = '▘'
-const LEFT_UP = '▘'
-const RIGHT_UP = '▝'
+const OUT = '─'
+const LEFT_IN = '╶'
+const RIGHT_IN = '╴'
 
-const pose = (top: [string, string, string], bottom: [string, string, string]): [string, string] => [
-  top.join(''),
-  bottom.join(''),
-]
+/** One row: its left arm stretched or pulled in, the middle, its right arm. */
+const row = (left: boolean, middle: string, right: boolean): string =>
+  `${left ? OUT : LEFT_IN}${middle}${right ? OUT : RIGHT_IN}`
 
-const REST = pose([LEFT_DOWN, EYES, RIGHT_DOWN], [LEFT_OUT, BODY, RIGHT_OUT])
+const pose = (
+  top: [boolean, boolean],
+  bottom: [boolean, boolean],
+  eyes: string = EYES,
+): [string, string] => [row(top[0], eyes, top[1]), row(bottom[0], BODY, bottom[1])]
+
+const REST = pose([true, true], [true, true])
 
 /** The mascot's two rows for an activity at a frame; every row seven columns wide. */
 export const spriteFor = (activity: MascotActivity, frame: number): [string, string] => {
@@ -46,30 +48,26 @@ export const spriteFor = (activity: MascotActivity, frame: number): [string, str
 
   switch (activity) {
     case 'idle':
-      // At rest, with a blink now and then.
-      return frame % 12 === 0 ? pose([LEFT_DOWN, BLINK, RIGHT_DOWN], [LEFT_OUT, BODY, RIGHT_OUT]) : REST
+      // Arms out, at rest, with a blink now and then.
+      return frame % 12 === 0 ? pose([true, true], [true, true], BLINK) : REST
     case 'thinking':
       // A slow blink while it works out what to do.
-      return frame % 4 < 2 ? REST : pose([LEFT_DOWN, BLINK, RIGHT_DOWN], [LEFT_OUT, BODY, RIGHT_OUT])
+      return frame % 4 < 2 ? REST : pose([true, true], [true, true], BLINK)
     case 'writing':
     case 'running':
     case 'reading':
     case 'planning':
-      // All four arms at it, crosswise: the upper left with the lower right, then the others.
-      return even
-        ? pose([LEFT_UP, EYES, RIGHT_DOWN], [LEFT_DOWN, BODY, RIGHT_OUT])
-        : pose([LEFT_DOWN, EYES, RIGHT_UP], [LEFT_OUT, BODY, RIGHT_DOWN])
+      // All four arms at it, crosswise: upper left with lower right, then the other two.
+      return even ? pose([true, false], [false, true]) : pose([false, true], [true, false])
     case 'done':
-      // All four arms up, and down, and up.
-      return even ? pose([LEFT_UP, EYES, RIGHT_UP], [LEFT_UP, BODY, RIGHT_UP]) : REST
+      // All four out, all four in: a cheer.
+      return even ? REST : pose([false, false], [false, false])
     case 'waiting':
       // One arm waving for you.
-      return even ? pose([LEFT_UP, EYES, RIGHT_DOWN], [LEFT_OUT, BODY, RIGHT_OUT]) : REST
+      return even ? REST : pose([true, false], [true, true])
     case 'alert':
-      // Arms flung up and back, blinking: something went wrong.
-      return even
-        ? pose([LEFT_UP, BLINK, RIGHT_UP], [LEFT_UP, BODY, RIGHT_UP])
-        : pose([LEFT_DOWN, EYES, RIGHT_DOWN], [LEFT_DOWN, BODY, RIGHT_DOWN])
+      // Arms pulled in, blinking: something went wrong.
+      return even ? pose([false, false], [false, false], BLINK) : REST
   }
 }
 

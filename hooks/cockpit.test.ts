@@ -1113,9 +1113,9 @@ test('a call is described by what it is: a file by its name, a command by itself
   expect(aboutCall('Bash', 'npm run build -- --out ./dist/app')).toBe('npm run build -- --out ./dist/app')
 })
 
-test('the mascot has four arms: a mark at each corner of its two rows', () => {
+test('the mascot has four arms, each a horizontal dash at the end of a row', () => {
   const [top, bottom] = spriteFor('idle', 1)
-  const isArm = (char: string | undefined) => ['▗', '▖', '▝', '▘'].includes(char ?? '')
+  const isArm = (char: string | undefined) => ['─', '╶', '╴'].includes(char ?? '')
 
   for (const row of [top, bottom]) {
     const chars = [...row]
