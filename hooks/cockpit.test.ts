@@ -1039,45 +1039,36 @@ test('a long turn ends with a chime and a toast; a short one stays quiet', async
   expect(toasts.join(' ')).toContain('✓ Done — your turn')
 })
 
-test('a subagent at work gets a mascot of its own', async ($, on) => {
-  let release: () => void = () => undefined
-  const held = new Promise<void>(resolve => {
-    release = resolve
-  })
+test('a background subagent keeps its mascot for as long as the engine says it runs', async ($, on) => {
+  // What the engine reports: two at work, until they are not.
+  let agents = [
+    { id: 'a1', description: 'count LOC', type: 'general-purpose', status: 'running' },
+    { id: 'a2', description: 'list test', type: 'general-purpose', status: 'running' },
+  ]
+  on('agent.list', () => ({ value: agents }))
   on('clock.now', () => ({ value: 1_000_000 }))
   on('clock.sleep', () => {
     throw new Error('no time passes in this test')
   })
-  on('tool.call', async () => {
-    await held
+  on('classic.SubagentStart', () => ({}))
+  on('classic.SubagentStop', () => ({}))
 
-    return { result: {}, text: 'ok', isError: false }
-  })
-
-  // The band first, then the call: it redraws as the subagent is recorded.
   const band = await $.ui.mount({
     plugin: 'cockpit',
     surface: 'terminal',
     component: 'AbovePrompt',
     props: BAND_PROPS,
   })
-  const running = $.tool.call({
-    tool: 'Agent',
-    tool_use_id: 'a1',
-    input: { description: 'find callers', prompt: 'find them' },
-  })
 
-  // Wait for what the test is about, not for a guessed delay: a fixed 40ms lost the race
-  // under load, one run in three.
-  let seen: unknown
-  for (const deadline = Date.now() + 2000; seen === undefined && Date.now() < deadline; ) {
-    seen = await band.find({ text: 'find cal…' })
-    if (seen === undefined) await new Promise(resolve => setTimeout(resolve, 10))
-  }
-  expect(seen).toBeDefined()
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'general-purpose' })
+  expect(await band.find({ text: 'count LOC' })).toBeDefined()
+  expect(await band.find({ text: 'list test' })).toBeDefined()
 
-  release()
-  await running
+  // One finishes: its mascot goes, the other's stays.
+  agents = [{ ...agents[0]!, status: 'completed' }, agents[1]!]
+  await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'general-purpose', stop_hook_active: false })
+  expect(await band.find({ text: 'count LOC' })).toBeUndefined()
+  expect(await band.find({ text: 'list test' })).toBeDefined()
 })
 
 test('new opens a fresh claude in a terminal of its own', async ($, on) => {

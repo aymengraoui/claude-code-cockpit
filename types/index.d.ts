@@ -122,6 +122,8 @@ export type MascotState = {
   failures: string[]
   /** When the running turn began, to tell a long turn from a short one. */
   turnStartedAt: number | null
+  /** Subagents still at work, as the engine reports them: each gets a mascot. */
+  agents: { id: string; label: string }[]
 }
 
 declare module 'claude-code' {

@@ -94,6 +94,7 @@ const MASCOT_IDLE: MascotState = {
   frame: 0,
   failures: [],
   turnStartedAt: null,
+  agents: [],
 }
 
 /** The mascot's own slot, so its frames redraw the band and nothing else. */
@@ -104,6 +105,7 @@ export const mascotDefaults = (stored: Partial<MascotState> | null | undefined):
   ...MASCOT_IDLE,
   ...(stored ?? {}),
   failures: Array.isArray(stored?.failures) ? stored.failures : [],
+  agents: Array.isArray(stored?.agents) ? stored.agents : [],
 })
 
 /**
@@ -407,7 +409,9 @@ const startAnimating = ($: EngineInterface): void => {
           last = now.activity
           still = 0
         }
-        const limit = WORKING.has(now.activity) ? MAX_FRAMES : now.activity === 'idle' ? 0 : SETTLE_FRAMES
+        if (now.agents.length > 0 && now.frame % 4 === 0) await syncAgents($)
+        const busy = WORKING.has(now.activity) || now.agents.length > 0
+        const limit = busy ? MAX_FRAMES : now.activity === 'idle' ? 0 : SETTLE_FRAMES
         if (still >= limit) break
 
         const isOk = await update($, mascot, prev => {
@@ -423,6 +427,36 @@ const startAnimating = ($: EngineInterface): void => {
       isAnimating = false
     }
   })()
+}
+
+/** The statuses of a subagent still at work. */
+const AT_WORK = new Set(['pending', 'running', 'waiting'])
+
+/**
+ * The subagents at work, as the engine reports them. An Agent call returns as soon as a
+ * background subagent starts, so the call alone would show its mascot for a moment; the
+ * engine's own list says it is still running until it is not.
+ */
+const readAgents = async ($: EngineInterface): Promise<{ id: string; label: string }[] | null> => {
+  try {
+    return (await $.agent.list())
+      .filter(one => AT_WORK.has(one.status))
+      .map(one => ({ id: one.id, label: one.description || one.type }))
+  } catch {
+    return null
+  }
+}
+
+/** Bring the mascots in line with the subagents at work, writing only on a change. */
+const syncAgents = async ($: EngineInterface): Promise<void> => {
+  const agents = await readAgents($)
+  if (agents === null) return
+  const was = mascotDefaults(await read($, mascot).catch(() => null)).agents
+  const same = was.length === agents.length && was.every((one, index) => one.id === agents[index]?.id)
+  if (same) return
+
+  await update($, mascot, prev => ({ ...mascotDefaults(prev), agents }))
+  startAnimating($)
 }
 
 /** Change the mascot, and let it move to show it. */
@@ -568,6 +602,18 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('classic.SubagentStart', async ($, e, next) => {
+    await syncAgents($)
+
+    return next(e)
+  })
+
+  on('classic.SubagentStop', async ($, e, next) => {
+    await syncAgents($)
+
+    return next(e)
+  })
+
   on('classic.Stop', async ($, e, next) => {
     const mode = typeof e.permission_mode === 'string' ? e.permission_mode : null
     const effort = typeof e.effort?.level === 'string' ? e.effort.level : null
@@ -661,6 +707,7 @@ export const register: Register = on => {
     }
 
     if (isAgent) {
+      await syncAgents($)
       await update($, state, prev => ({
         ...prev,
         agents: prev.agents.map(one => (one.id === entry.id ? { ...one, ...done } : one)),
@@ -980,7 +1027,7 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
     const m = mascotDefaults(await read($, mascot))
     const it = withDefaults(await read($, state))
-    const running = it.agents.filter(one => one.ms === null)
+    const running = m.agents
     const agents = running.slice(0, 4)
     const extra = running.length - agents.length
 
@@ -1020,7 +1067,7 @@ export const register: Register = on => {
                   <Text color={tint}>{row}</Text>
                 </Box>
               ))}
-              <Text color={tint}>{shortText(agent.subject, 9)}</Text>
+              <Text color={tint}>{shortText(agent.label, 9)}</Text>
             </Box>
           )
         })}
