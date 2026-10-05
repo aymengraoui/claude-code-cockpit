@@ -555,6 +555,8 @@ export const register: Register = on => {
     // Opened unasked, the pane seats itself only once the terminal is wide enough.
     void $.ui.open({ id: PANE, title: 'cockpit' })
     startTicking($)
+    // Subagents already at work when this loads — a reload mid-task — get their mascots too.
+    await syncAgents($)
 
     return next(e)
   })
