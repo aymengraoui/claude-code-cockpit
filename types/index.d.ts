@@ -58,8 +58,12 @@ export type Past = {
   id: string
   /** Epoch ms the transcript was last written: that session's last activity. */
   at: number
-  /** Its first typed prompt, or the id's first characters when it has none. */
+  /** Its `/rename` name, else Claude Code's title for it, else its first typed prompt. */
   title: string
+  /** The directory it ran in, where `claude --resume` finds it; null when it never said. */
+  cwd: string | null
+  /** That directory's last segment: the project it belongs to. */
+  project: string
 }
 
 /** Everything the pane draws, as the hooks accumulate it. */
@@ -87,8 +91,10 @@ export type Cockpit = {
   isRepoChecked: boolean
   todos: Todo[]
   agents: Activity[]
-  /** Claude Code's recent sessions, newest first, this one included. */
+  /** Claude Code's sessions in every project, newest first, this one included. */
   history: Past[]
+  /** The page of the full session list on show in place of the overview; null while closed. */
+  sessionsPage: number | null
   /** When the live ticker last looked; a redraw of the clocks hangs off it. */
   tickedAt: number | null
   /** A file's diff, when one is open. */

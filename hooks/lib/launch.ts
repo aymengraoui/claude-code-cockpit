@@ -22,7 +22,8 @@ export const launchCommands = (
       // Windows Terminal: a new tab in the window that is already open.
       ['wt.exe', '-w', '0', 'nt', '-d', cwd, 'powershell', '-NoExit', '-Command', command],
       // No Windows Terminal: a console window of its own.
-      ['cmd.exe', '/c', 'start', '', 'cmd.exe', '/k', command],
+      // `start /D` sets where it opens: a resumed session is found from its own directory.
+      ['cmd.exe', '/c', 'start', '', '/D', cwd, 'cmd.exe', '/k', command],
     ]
   }
 

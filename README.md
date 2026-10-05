@@ -111,17 +111,24 @@ process it ever starts is `git`:
 | branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
 | what fills the context | `$.session.usage({ breakdown: 'summary' })`, the categories `/context` counts |
 | running agents | `tool.call` on the `Agent` tool, timed around `next(e)` |
-| Claude Code's sessions | the transcripts in this project's transcript directory, found through the `transcript_path` the classic hook inputs carry |
+| Claude Code's sessions | the transcripts in every project's transcript directory, found beside the `transcript_path` the classic hook inputs carry |
 
-The session list is Claude Code's own, not the mod's bookkeeping. Claude Code writes one
-`<session-id>.jsonl` per session into a per-project directory, and the classic hook inputs
-carry this session's `transcript_path` — which sits in that directory, so it is never guessed.
-The eight newest are listed, each titled by the first prompt its author actually typed (meta
-rows and slash-command echoes skipped), or by its id where it holds no prompt yet.
+The session list is Claude Code's own, not the mod's bookkeeping: what `/resume` lists. Claude
+Code writes one `<session-id>.jsonl` per session into a per-project directory, all of them side
+by side under `~/.claude/projects`, and the classic hook inputs carry this session's
+`transcript_path` — so the directory is never guessed. Every project's sessions are listed,
+newest first, each titled as `/resume` titles it: the name given with `/rename`, else the title
+Claude Code wrote for it, else the first prompt its author actually typed. A session opened and
+left alone has nothing to resume and is left out, as `/resume` leaves it out.
 
-Titles are cached in `$.store`: a session's first prompt cannot change, so each transcript is
-read at most once ever and later listings only stat the directory. The directory itself is
-cached too, so a reload lists the sessions before any prompt has been typed.
+The overview shows the five newest, with how long ago each ran and, for another project's, which
+project. `all ›` swaps the overview for the whole list, a page at a time.
+
+What each transcript says is cached in `$.store` with the time it was written, so it is read
+again only once it changes. `$.fs.read` stops at 4 MiB, and the longest sessions are the ones
+most worth resuming, so a larger transcript is read with `git grep` for just its title rows and
+first prompts. The directory itself is cached too, so a reload lists the sessions before any
+prompt has been typed.
 
 **Press the model or the effort to change it.** Each opens the engine's own picker, `/model`
 or `/effort`, through `$.command.run`, which runs a slash command as if it were typed. The
@@ -156,7 +163,7 @@ of the last file the session wrote, and remembers it for the next launch.
 
 **Press a session to open it.** The hook API exposes no way to switch sessions in place —
 `--resume` is a launch flag — so a press opens `claude --resume <id>` in a terminal of its
-own, trying Windows Terminal then a console on Windows, Terminal.app then the usual
+own, in the directory that session ran in (where `--resume` finds it), trying Windows Terminal then a console on Windows, Terminal.app then the usual
 emulators elsewhere. Nothing about the setup is assumed: when no terminal answers, the
 command goes to the clipboard instead, so a click is never lost.
 

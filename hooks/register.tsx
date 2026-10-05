@@ -16,13 +16,18 @@ import {
 import { capDiff, parseNumstat, parseStatus, relativeTo, withCounts } from './lib/git'
 import { subjectOf, todosOf } from './lib/tools'
 import {
+  ago,
   dirOf,
+  idOf,
+  grepArgv,
+  isResumable,
   MAX_READ_BYTES,
+  metaFromTranscript,
   pickRecent,
   resumeCommand,
-  titleFromTranscript,
   toPast,
 } from './lib/sessions'
+import type { Found, Meta } from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
 import { heatOf, TOKYO } from './lib/palette'
 import { aboutCall, activityOfTool, CHIME_AFTER_MS, describe, spriteFor } from './lib/mascot'
@@ -32,11 +37,14 @@ import { fromUsage } from './lib/usage'
 
 const PANE = 'cockpit'
 
-/** `$.store` key holding transcript titles, which never change once written. */
-const TITLES = 'cockpit.titles'
+/** `$.store` key holding what each transcript said, by session id, with the mtime it was read at. */
+const SESSIONS = 'cockpit.sessions'
 /** `$.store` key holding the transcript directory, so a reload knows it before any prompt. */
 const DIR = 'cockpit.transcriptDir'
-const SESSIONS_LISTED = 8
+/** Sessions read and listed, across every project: `/resume`'s list, newest first. */
+const SESSIONS_LISTED = 200
+/** Sessions the overview shows; the rest are a press away. */
+const SESSIONS_SHOWN = 5
 /** `$.store` key holding the repository last worked in, for a launch outside any repo. */
 const REPO = 'cockpit.repoDir'
 /** How long a press that wants confirming stays armed. */
@@ -80,6 +88,7 @@ const EMPTY: Cockpit = {
   todos: [],
   agents: [],
   history: [],
+  sessionsPage: null,
   tickedAt: null,
   diff: null,
   contextRows: null,
@@ -137,15 +146,22 @@ const mine = new Set<string>()
 
 const AGENTS_KEPT = 12
 
-/** The titles read so far, by session id; they never change, so they are cached for good. */
-const readTitles = async ($: EngineInterface): Promise<Record<string, string>> => {
+/** This session's id, kept in the list even before anything has been typed in it. */
+let liveId = ''
+
+/** What a transcript said, and the mtime it said it at: re-read only once it changes. */
+type Known = Meta & { mtimeMs: number }
+
+/** What the transcripts read so far said, by session id. */
+const readKnown = async ($: EngineInterface): Promise<Record<string, Known>> => {
   try {
-    const stored = await $.store.get(TITLES)
+    const stored = await $.store.get(SESSIONS)
     if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return {}
 
     return Object.fromEntries(
       Object.entries(stored as Record<string, unknown>).filter(
-        (pair): pair is [string, string] => typeof pair[1] === 'string',
+        (pair): pair is [string, Known] =>
+          typeof pair[1] === 'object' && pair[1] !== null && typeof (pair[1] as Known).mtimeMs === 'number',
       ),
     )
   } catch {
@@ -153,44 +169,80 @@ const readTitles = async ($: EngineInterface): Promise<Record<string, string>> =
   }
 }
 
+/** One transcript's title, prompt and directory, read whole or, past 4 MiB, grepped. */
+const readMeta = async ($: EngineInterface, found: Found): Promise<Meta | null> => {
+  try {
+    if (found.size <= MAX_READ_BYTES) return metaFromTranscript(await $.fs.read(`${found.dir}/${found.name}`))
+
+    const runs = await Promise.all(
+      grepArgv(found.name).map(argv => $.process.run(argv, { cwd: found.dir }).catch(() => null)),
+    )
+
+    return metaFromTranscript(runs.map(run => run?.stdout ?? '').join(String.fromCharCode(10)))
+  } catch {
+    // A transcript being written, or gone: it is listed by its id instead.
+    return null
+  }
+}
+
 /**
- * Claude Code's own recent sessions, from the transcripts beside this session's.
+ * Claude Code's own sessions, every project's: what `/resume` lists.
  *
- * Each transcript is read at most once ever: its first prompt cannot change, so the
- * title goes into `$.store` and later listings only stat the directory.
+ * Every project keeps its transcripts in a folder of its own, side by side under one
+ * `projects` directory — the parent of this session's. Each transcript is read once
+ * and again only when it changes; listings after that only stat the folders.
  */
 const readSessions = async ($: EngineInterface, dir: string): Promise<Past[]> => {
   if (dir === '') return []
 
-  let entries
+  const root = dir.split('/').slice(0, -1).join('/')
+  let folders: string[]
   try {
-    entries = await $.fs.list(dir)
+    folders = (await $.fs.list(root)).filter(one => one.kind === 'dir').map(one => `${root}/${one.name}`)
   } catch {
-    return []
+    folders = [dir]
   }
+  if (!folders.includes(dir)) folders.push(dir)
 
-  const recent = pickRecent(entries, SESSIONS_LISTED)
-  const titles = await readTitles($)
-  let isNew = false
-
-  for (const entry of recent) {
-    const id = entry.name.replace(/\.jsonl$/, '')
-    if (titles[id] !== undefined || entry.size > MAX_READ_BYTES) continue
-
-    try {
-      const title = titleFromTranscript(await $.fs.read(`${dir}/${entry.name}`))
-      if (title !== null) {
-        titles[id] = title
-        isNew = true
+  const listed = await Promise.all(
+    folders.map(async folder => {
+      try {
+        return (await $.fs.list(folder)).map((entry): Found => ({ ...entry, dir: folder }))
+      } catch {
+        return []
       }
-    } catch {
-      // A transcript being written, or gone: it is listed by its id instead.
-    }
+    }),
+  )
+  const recent = pickRecent(listed.flat(), SESSIONS_LISTED)
+  const known = await readKnown($)
+  const stale = recent.filter(one => known[idOf(one.name)]?.mtimeMs !== one.mtimeMs)
+
+  const read = await Promise.all(stale.map(async found => [found, await readMeta($, found)] as const))
+  for (const [found, meta] of read) {
+    if (meta !== null) known[idOf(found.name)] = { ...meta, mtimeMs: found.mtimeMs }
   }
 
-  if (isNew) await $.store.set(TITLES, titles).catch(() => undefined)
+  if (read.length > 0) {
+    // Only the sessions still listed are kept, so the store never outgrows the list.
+    const kept = Object.fromEntries(
+      recent.flatMap(one => {
+        const value = known[idOf(one.name)]
 
-  return recent.map(entry => toPast(entry, titles[entry.name.replace(/\.jsonl$/, '')] ?? null))
+        return value === undefined ? [] : [[idOf(one.name), value]]
+      }),
+    )
+    await $.store.set(SESSIONS, kept).catch(() => undefined)
+  }
+
+
+  // A session opened and left alone has nothing to resume; `/resume` leaves it out too.
+  return recent
+    .filter(one => {
+      const meta = known[idOf(one.name)]
+
+      return meta === undefined || isResumable(meta) || idOf(one.name) === liveId
+    })
+    .map(one => toPast(one, known[idOf(one.name)] ?? null))
 }
 
 /** Runs git, answering its output on success and '' on anything else. */
@@ -529,6 +581,7 @@ export const register: Register = on => {
       $.store.get(REPO).catch(() => null),
     ])
 
+    if (id !== '') liveId = id
     repoDir = (await rootOf($, cwd)) || (typeof storedRepo === 'string' ? storedRepo : '')
     const repo = await readRepo($)
 
@@ -636,7 +689,10 @@ export const register: Register = on => {
   // session's transcript beside it — so the list is its sessions, not the mod's bookkeeping.
   on('classic.SessionStart', async ($, e, next) => {
     const path = typeof e.transcript_path === 'string' ? e.transcript_path : ''
-    if (path !== '') transcriptPath = path
+    if (path !== '') {
+      transcriptPath = path
+      liveId = idOf(toPosix(path).split('/').at(-1) ?? '')
+    }
     const named = path === '' ? '' : dirOf(path)
     if (named !== '') {
       dir = named
@@ -819,6 +875,69 @@ export const register: Register = on => {
       )
     }
 
+    /** One session: marked when live, its title, then how long ago and which project. */
+    const SessionRow = ({ past }: { past: Past }) => {
+      const isLive = past.id === it.sessionId
+      const isHere = past.project === it.project
+      const tail = isHere ? ` ${ago(past.at, now)}` : ` ${ago(past.at, now)} · ${shortText(past.project, 12)}`
+
+      return (
+        <Box key={`past-row-${past.id}`}>
+          <Text color={isLive ? TOKYO.orange : TOKYO.dim}>{isLive ? '▸ ' : '  '}</Text>
+          <Button
+            key={`past-${past.id}`}
+            plain
+            label={shortText(past.title, Math.max(6, columns - 2 - tail.length))}
+            onPress={() => openSession($, past.id, past.cwd ?? it.cwd ?? '.', e.surface)}
+          />
+          <Text color={TOKYO.dim}>{tail}</Text>
+        </Box>
+      )
+    }
+
+    if (it.sessionsPage !== null) {
+      // Everything but the heading, the two rules and the footer is the list.
+      const perPage = Math.max(3, rows - 5)
+      const pages = Math.max(1, Math.ceil(it.history.length / perPage))
+      const page = Math.min(it.sessionsPage, pages - 1)
+      const shown = it.history.slice(page * perPage, (page + 1) * perPage)
+      const toPage = (to: number) => update($, state, prev => ({ ...prev, sessionsPage: to }))
+
+      return (
+        <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
+          <Box flexDirection="column" flexGrow={1} overflow="hidden">
+            <Box>
+              {Head({ title: 'ALL SESSIONS', count: it.history.length })}
+              {pages > 1 && <Text color={TOKYO.dim}> · page {page + 1}/{pages}</Text>}
+            </Box>
+            <Text color={TOKYO.line}>{rule}</Text>
+            {shown.map(past => SessionRow({ past }))}
+          </Box>
+          <Text color={TOKYO.line}>{rule}</Text>
+          <Box>
+            <Button
+              key="sessions-close"
+              plain
+              label="← back"
+              onPress={() => update($, state, prev => ({ ...prev, sessionsPage: null }))}
+            />
+            {page > 0 && (
+              <Box>
+                <Text color={TOKYO.dim}> · </Text>
+                <Button key="sessions-prev" plain label="‹ newer" onPress={() => toPage(page - 1)} />
+              </Box>
+            )}
+            {page < pages - 1 && (
+              <Box>
+                <Text color={TOKYO.dim}> · </Text>
+                <Button key="sessions-next" plain label="older ›" onPress={() => toPage(page + 1)} />
+              </Box>
+            )}
+          </Box>
+        </Box>
+      )
+    }
+
     if (it.diff !== null) {
       const { path, source, format } = it.diff
 
@@ -982,21 +1101,22 @@ export const register: Register = on => {
           )}
 
           <Text color={TOKYO.line}>{rule}</Text>
-          {Head({ title: "SESSIONS", count: it.history.length })}
+          <Box>
+            {Head({ title: 'SESSIONS', count: it.history.length })}
+            {it.history.length > SESSIONS_SHOWN && (
+              <Box>
+                <Text color={TOKYO.dim}> · </Text>
+                <Button
+                  key="sessions-all"
+                  plain
+                  label="all ›"
+                  onPress={() => update($, state, prev => ({ ...prev, sessionsPage: 0 }))}
+                />
+              </Box>
+            )}
+          </Box>
           {it.history.length === 0 && <Text color={TOKYO.dim}>no transcripts found</Text>}
-          {it.history.slice(0, 6).map(past => (
-            <Box key={`past-row-${past.id}`}>
-              <Text color={past.id === it.sessionId ? TOKYO.orange : TOKYO.dim}>
-                {past.id === it.sessionId ? '▸ ' : '  '}
-              </Text>
-              <Button
-                key={`past-${past.id}`}
-                plain
-                label={shortText(past.title, Math.max(6, columns - 3))}
-                onPress={() => openSession($, past.id, it.cwd ?? '.', e.surface)}
-              />
-            </Box>
-          ))}
+          {it.history.slice(0, SESSIONS_SHOWN).map(past => SessionRow({ past }))}
           {it.history.length > 0 && (
             <Text color={TOKYO.dim}>press a session to open it in a new terminal</Text>
           )}

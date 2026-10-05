@@ -1,8 +1,11 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
+  ago,
   dirOf,
+  grepArgv,
   idOf,
+  metaFromTranscript,
   pickRecent,
   resumeCommand,
   titleFromTranscript,
@@ -335,29 +338,96 @@ test('only transcripts are listed, newest first, empty ones left out', () => {
 })
 
 test('a transcript with no prompt is listed by its id instead', () => {
-  const entry = { name: 'abcdef1234.jsonl', kind: 'file' as const, size: 10, mtimeMs: 2000 }
+  const found = { name: 'abcdef1234.jsonl', kind: 'file' as const, size: 10, mtimeMs: 2000, dir: '/p/-home-me-app' }
 
-  expect(toPast(entry, 'fix the parser')).toEqual({
+  expect(toPast(found, { title: null, prompt: 'fix the parser', cwd: '/home/me/app' })).toEqual({
     id: 'abcdef1234',
     at: 2000,
     title: 'fix the parser',
+    cwd: '/home/me/app',
+    project: 'app',
   })
-  expect(toPast(entry, null).title).toBe('abcdef12')
+  expect(toPast(found, null).title).toBe('abcdef12')
+  expect(toPast(found, null).project).toBe('-home-me-app')
 })
 
-test("the pane lists Claude Code's own sessions, read from its transcripts", async ($, on) => {
+test('a session is titled as /resume titles it: its name, then its AI title, then its first prompt', () => {
+  const sep = String.fromCharCode(92)
+  const rows = (...extra: object[]) =>
+    [
+      JSON.stringify({ type: 'user', cwd: `C:${sep}Users${sep}me${sep}app`, message: { content: 'fix the parser' } }),
+      ...extra.map(one => JSON.stringify(one)),
+    ].join(String.fromCharCode(10))
+
+  expect(metaFromTranscript(rows())).toEqual({ title: null, prompt: 'fix the parser', cwd: 'C:/Users/me/app' })
+  expect(metaFromTranscript(rows({ type: 'ai-title', aiTitle: 'Parser rounding' })).title).toBe('Parser rounding')
+  expect(
+    metaFromTranscript(
+      rows(
+        { type: 'custom-title', customTitle: 'old name' },
+        { type: 'ai-title', aiTitle: 'Parser rounding' },
+        { type: 'custom-title', customTitle: 'parser work' },
+      ),
+    ).title,
+  ).toBe('parser work')
+  expect(metaFromTranscript(TRANSCRIPT).prompt).toBe('fix the parser')
+})
+
+test('a transcript too large to read is grepped from its own folder', () => {
+  const runs = grepArgv('big.jsonl')
+
+  expect(runs.length).toBe(2)
+  for (const argv of runs) {
+    expect(argv.slice(0, 3)).toEqual(['git', 'grep', '--no-index'])
+    expect(argv.at(-1)).toBe('big.jsonl')
+  }
+})
+
+test('how long ago reads short', () => {
+  const now = 100 * 86400000
+
+  expect(ago(now - 10000, now)).toBe('now')
+  expect(ago(now - 12 * 60000, now)).toBe('12m')
+  expect(ago(now - 3 * 3600000, now)).toBe('3h')
+  expect(ago(now - 4 * 86400000, now)).toBe('4d')
+  expect(ago(now - 21 * 86400000, now)).toBe('3w')
+})
+
+test("the pane lists Claude Code's sessions from every project, and all of them a press away", async ($, on) => {
   const sep = String.fromCharCode(92)
   const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
+  const now = Date.now()
+  const others = Array.from({ length: 7 }, (_, index) => ({
+    name: `other-${index}.jsonl`,
+    kind: 'file',
+    size: 200,
+    mtimeMs: now - (index + 2) * 3600000,
+  }))
 
   on('store.get', () => ({ value: {} }))
   on('store.set', () => ({ value: undefined }))
-  on('fs.list', () => ({
-    value: [
-      { name: 'current.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() },
-      { name: 'older.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() - 7200000 },
-    ],
+  const posix = (at: string) => at.split(sep).join('/')
+
+  on('fs.list', (_$, e) => ({
+    value: posix(e.path).endsWith('/projects')
+      ? [
+          { name: 'p', kind: 'dir', size: 0, mtimeMs: 0 },
+          { name: 'q', kind: 'dir', size: 0, mtimeMs: 0 },
+        ]
+      : posix(e.path).endsWith('/p')
+        ? [
+            { name: 'current.jsonl', kind: 'file', size: 200, mtimeMs: now },
+            { name: 'empty.jsonl', kind: 'file', size: 200, mtimeMs: now - 60000 },
+          ]
+        : others,
   }))
-  on('fs.read', () => ({ value: TRANSCRIPT }))
+  on('fs.read', (_$, e) => ({
+    value: e.path.endsWith('empty.jsonl')
+      ? JSON.stringify({ type: 'mode' })
+      : posix(e.path).includes('/q/')
+        ? JSON.stringify({ type: 'user', cwd: '/home/me/elsewhere', message: { content: 'tune the cache' } })
+        : TRANSCRIPT,
+  }))
   on('classic.SessionStart', () => ({}))
 
   await $.classic.SessionStart({ source: 'startup', transcript_path: path })
@@ -372,6 +442,15 @@ test("the pane lists Claude Code's own sessions, read from its transcripts", asy
 
   expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
   expect(await ui.find({ text: 'fix the parser' })).toBeDefined()
+  expect(await ui.find({ text: 'tune the cache' })).toBeDefined()
+  expect(await ui.find({ text: 'elsewhere' })).toBeDefined()
+  // A session with nothing typed in it has nothing to resume.
+  expect(await ui.find({ text: 'empty' })).toBeUndefined()
+
+  await ui.press({ key: 'sessions-all' })
+  expect(await ui.find({ text: 'ALL SESSIONS' })).toBeDefined()
+  await ui.press({ key: 'sessions-close' })
+  expect(await ui.find({ text: 'ALL SESSIONS' })).toBeUndefined()
 })
 
 test('a session names the command that returns to it', () => {
