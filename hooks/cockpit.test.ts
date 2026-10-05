@@ -1124,12 +1124,15 @@ test('the mascot has four arms: a mark at each corner of its two rows', () => {
   }
 })
 
-test('what the mascot is doing is written under it, and the band sits on its bottom edge', async ($, on) => {
+test('the mascot lives at the right, on the bottom edge, its words under it', async ($, on) => {
   const { band } = await startBand($, on, { now: 1_000_000 })
   const root = (await band.drawn()) as { props?: { alignItems?: string } }
 
   expect(root.props?.alignItems).toBe('flex-end')
-  const [main] = childrenOf(root)
+  // It lives on the right: the band is full width and its content pushed to the end.
+  expect((root.props as { justifyContent?: string }).justifyContent).toBe('flex-end')
+  expect((root.props as { width?: number }).width).toBe(BAND_PROPS.bodyColumns)
+  const main = childrenOf(root).at(-1)
   const rows = childrenOf(main)
   // Two sprite rows, then the words.
   expect(rows.length).toBe(3)

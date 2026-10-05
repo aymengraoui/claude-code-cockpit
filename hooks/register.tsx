@@ -1005,23 +1005,16 @@ export const register: Register = on => {
       )
     }
 
+    // The full width of the band, everything pushed to its right edge: subagents first,
+    // the session's own mascot last, so it is the one at the edge.
     return (
-      <Box alignItems="flex-end">
-        <Box flexDirection="column">
-          {spriteFor(m.activity, m.frame).map((row, index) => (
-            <Box key={`me-${index}`}>
-              <Text color={colour}>{row}</Text>
-            </Box>
-          ))}
-          <Text color={colour} bold>
-            {shortText(line, Math.max(12, e.props.bodyColumns - 2 - agents.length * 12))}
-          </Text>
-        </Box>
+      <Box width={e.props.bodyColumns} justifyContent="flex-end" alignItems="flex-end">
+        {extra > 0 && <Text color={TOKYO.dim}>+{extra} </Text>}
         {agents.map((agent, index) => {
           const tint = AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue
 
           return (
-            <Box key={`agent-mascot-${agent.id}`} flexDirection="column" marginLeft={3}>
+            <Box key={`agent-mascot-${agent.id}`} flexDirection="column" alignItems="flex-end" marginRight={3}>
               {spriteFor('running', m.frame + index).map((row, rowIndex) => (
                 <Box key={`agent-${agent.id}-${rowIndex}`}>
                   <Text color={tint}>{row}</Text>
@@ -1031,7 +1024,16 @@ export const register: Register = on => {
             </Box>
           )
         })}
-        {extra > 0 && <Text color={TOKYO.dim}> +{extra}</Text>}
+        <Box flexDirection="column" alignItems="flex-end" marginLeft={agents.length > 0 ? 3 : 0}>
+          {spriteFor(m.activity, m.frame).map((row, index) => (
+            <Box key={`me-${index}`}>
+              <Text color={colour}>{row}</Text>
+            </Box>
+          ))}
+          <Text color={colour} bold>
+            {shortText(line, Math.max(12, e.props.bodyColumns - 2 - agents.length * 12))}
+          </Text>
+        </Box>
       </Box>
     )
   })

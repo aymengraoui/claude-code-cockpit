@@ -39,14 +39,14 @@ pane follows whatever theme you run, custom ones included.
 
 ## The mascot
 
-Right above the input, a small four-armed mascot acts out what the session is doing, with
-what it is doing written underneath. Each subagent at work gets one of its own, in its own
-colour, labelled with its task:
+Right above the input, at the right-hand edge, a small four-armed mascot acts out what the
+session is doing, with what it is doing written underneath. Each subagent at work gets one
+of its own to its left, in its own colour, labelled with its task:
 
 ```
-▗▐▛█▜▌▖   ▘▐▛█▜▌▖   ▗▐▛█▜▌▝
-▝▜███▛▘   ▗▜███▛▘   ▝▜███▛▖
-running npm test   find cal…   write t…
+                               ▘▐▛█▜▌▖   ▗▐▛█▜▌▝          ▗▐▛█▜▌▖
+                               ▗▜███▛▘   ▝▜███▛▖          ▝▜███▛▘
+                             find cal…  write t…   running npm test
 ```
 
 It is built for attention that drifts. **Motion means something is happening**: the arms
