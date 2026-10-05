@@ -1,6 +1,6 @@
 {
   "name": "cockpit",
-  "version": "0.19.4",
+  "version": "0.19.5",
   "description": "A sidebar and a mascot for Claude Code in the terminal: usage, branch, diffs, sessions, and an always-visible line that says what is happening and whose turn it is.",
   "author": {
     "name": "Aymen Graoui",

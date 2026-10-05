@@ -19,12 +19,12 @@ export const activityOfTool = (tool: string): MascotActivity => {
   return 'thinking'
 }
 
-// Two rows, five columns, four arms: a dash at each end of each row is an arm, the middle
+// Two rows, seven columns, four arms: a dash at each end of each row is an arm, the middle
 // the head (its eyes) and the body. An arm is stretched out, or pulled in to the half of the
 // cell against the body — still a heavy dash, so the arms can move. Every frame keeps that size.
-const EYES = '▛█▜'
-const BLINK = '▀█▀'
-const BODY = '▜█▛'
+const EYES = '▐▛█▜▌'
+const BLINK = '▐▀█▀▌'
+const BODY = '▜███▛'
 
 const OUT = '━'
 const LEFT_IN = '╺'
@@ -42,7 +42,7 @@ const pose = (
 
 const REST = pose([true, true], [true, true])
 
-/** The mascot's two rows for an activity at a frame; every row five columns wide. */
+/** The mascot's two rows for an activity at a frame; every row seven columns wide. */
 export const spriteFor = (activity: MascotActivity, frame: number): [string, string] => {
   const even = frame % 2 === 0
 
