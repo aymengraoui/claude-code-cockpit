@@ -1053,21 +1053,27 @@ test('a subagent at work gets a mascot of its own', async ($, on) => {
     return { result: {}, text: 'ok', isError: false }
   })
 
-  const running = $.tool.call({
-    tool: 'Agent',
-    tool_use_id: 'a1',
-    input: { description: 'find callers', prompt: 'find them' },
-  })
-  // Let the call get as far as the subagent running: recorded, not yet returned.
-  await new Promise(resolve => setTimeout(resolve, 40))
-
+  // The band first, then the call: it redraws as the subagent is recorded.
   const band = await $.ui.mount({
     plugin: 'cockpit',
     surface: 'terminal',
     component: 'AbovePrompt',
     props: BAND_PROPS,
   })
-  expect(await band.find({ text: '1 agent working' })).toBeDefined()
+  const running = $.tool.call({
+    tool: 'Agent',
+    tool_use_id: 'a1',
+    input: { description: 'find callers', prompt: 'find them' },
+  })
+
+  // Wait for what the test is about, not for a guessed delay: a fixed 40ms lost the race
+  // under load, one run in three.
+  let seen: unknown
+  for (const deadline = Date.now() + 2000; seen === undefined && Date.now() < deadline; ) {
+    seen = await band.find({ text: '1 agent working' })
+    if (seen === undefined) await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  expect(seen).toBeDefined()
 
   release()
   await running
