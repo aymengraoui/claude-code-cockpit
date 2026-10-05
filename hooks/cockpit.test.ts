@@ -902,23 +902,22 @@ const ALL_ACTIVITIES: MascotActivity[] = [
   'idle', 'thinking', 'writing', 'running', 'reading', 'planning', 'done', 'alert', 'waiting',
 ]
 
-test('every frame of every activity is two rows of seven columns', () => {
+test('every frame of every activity is three rows of nine columns', () => {
   for (const activity of ALL_ACTIVITIES) {
     for (let frame = 0; frame < 24; frame += 1) {
       const rows = spriteFor(activity, frame)
-      expect(rows.length).toBe(2)
-      for (const row of rows) expect([...row].length).toBe(7)
+      expect(rows.length).toBe(3)
+      for (const row of rows) expect([...row].length).toBe(9)
     }
   }
 })
 
 test('the mascot moves differently for each kind of moment', () => {
-  // Idle blinks now and then; a failure flings its arms; done throws all four up.
+  // Idle blinks now and then; a failure shakes; done throws its arms up.
   expect(spriteFor('idle', 0)[0]).not.toBe(spriteFor('idle', 1)[0])
   expect(spriteFor('alert', 0)).not.toEqual(spriteFor('alert', 1))
   expect(spriteFor('done', 0)[1]).not.toBe(spriteFor('done', 1)[1])
-  // Waiting waves one upper arm.
-  expect(spriteFor('waiting', 0)[0]).not.toBe(spriteFor('waiting', 1)[0])
+  expect(spriteFor('waiting', 0)[1]).not.toBe(spriteFor('waiting', 1)[1])
 })
 
 test('a tool reads as what the mascot is doing, and that reads as plain words', () => {
@@ -1113,17 +1112,6 @@ test('a call is described by what it is: a file by its name, a command by itself
   expect(aboutCall('Bash', 'npm run build -- --out ./dist/app')).toBe('npm run build -- --out ./dist/app')
 })
 
-test('the mascot has four arms, each a horizontal dash at the end of a row', () => {
-  const [top, bottom] = spriteFor('idle', 1)
-  const isArm = (char: string | undefined) => ['━', '╺', '╸'].includes(char ?? '')
-
-  for (const row of [top, bottom]) {
-    const chars = [...row]
-    expect(isArm(chars[0])).toBe(true)
-    expect(isArm(chars.at(-1))).toBe(true)
-  }
-})
-
 test('the mascot lives at the right, on the bottom edge, its words under it', async ($, on) => {
   const { band } = await startBand($, on, { now: 1_000_000 })
   const root = (await band.drawn()) as { props?: { alignItems?: string } }
@@ -1134,9 +1122,9 @@ test('the mascot lives at the right, on the bottom edge, its words under it', as
   expect((root.props as { width?: number }).width).toBe(BAND_PROPS.bodyColumns)
   const main = childrenOf(root).at(-1)
   const rows = childrenOf(main)
-  // Two sprite rows, then the words.
-  expect(rows.length).toBe(3)
-  expect(JSON.stringify(rows[2])).toContain('ready')
+  // Three sprite rows, then the words.
+  expect(rows.length).toBe(4)
+  expect(JSON.stringify(rows[3])).toContain('ready')
 })
 
 test('a question put to you is marked; code, headings and plain lines are not', () => {

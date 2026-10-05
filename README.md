@@ -39,7 +39,7 @@ pane follows whatever theme you run, custom ones included.
 
 ## The mascot
 
-Right above the input, at the right-hand edge, a small four-armed mascot acts out what the
+Right above the input, at the right-hand edge, Claude's own mascot acts out what the
 session is doing, with what it is doing written underneath. Each subagent at work gets one
 of its own to its left, in its own colour, labelled with its task:
 
@@ -49,8 +49,7 @@ of its own to its left, in its own colour, labelled with its task:
                              find cal…  write t…   running npm test
 ```
 
-Its four arms are heavy dashes at the ends of its two rows, stretched out or pulled in. It is built
-for attention that drifts. **Motion means something is happening**: the arms go while work
+It is built for attention that drifts. **Motion means something is happening**: the arms go while work
 is under way and for a few seconds after a change, then the mascot stands
 still — idle never moves. **Colour says whose turn it is**: green when done (`✓ done — your
 turn`), red when a step failed (`⚠ failed 1 step: npm test`, kept until the next prompt),
