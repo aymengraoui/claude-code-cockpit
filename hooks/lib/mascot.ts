@@ -19,44 +19,57 @@ export const activityOfTool = (tool: string): MascotActivity => {
   return 'thinking'
 }
 
-const HEAD = ' ▐▛███▜▌ '
-const BLINK = ' ▐▀███▀▌ '
-const BODY = '▝▜█████▛▘'
-const ARMS_UP = '▗▟█████▙▖'
-const WAVE_LEFT = '▗▟█████▛▘'
-const WAVE_RIGHT = '▝▜█████▙▖'
-const LEGS = '  ▘▘ ▝▝  '
-const STEP = '  ▝▘ ▘▝  '
+// Two rows, seven columns, four arms: the corners of each row are the arms, the middle
+// the head (its eyes) and the body. Every frame keeps that size.
+const EYES = '▐▛█▜▌'
+const BLINK = '▐▀█▀▌'
+const BODY = '▜███▛'
 
-/** The mascot's three rows for an activity at a frame; every row nine columns wide. */
-export const spriteFor = (activity: MascotActivity, frame: number): [string, string, string] => {
+/** Arms as the corner marks of a row: down-and-out, or raised. */
+const LEFT_DOWN = '▗'
+const LEFT_OUT = '▝'
+const RIGHT_DOWN = '▖'
+const RIGHT_OUT = '▘'
+const LEFT_UP = '▘'
+const RIGHT_UP = '▝'
+
+const pose = (top: [string, string, string], bottom: [string, string, string]): [string, string] => [
+  top.join(''),
+  bottom.join(''),
+]
+
+const REST = pose([LEFT_DOWN, EYES, RIGHT_DOWN], [LEFT_OUT, BODY, RIGHT_OUT])
+
+/** The mascot's two rows for an activity at a frame; every row seven columns wide. */
+export const spriteFor = (activity: MascotActivity, frame: number): [string, string] => {
   const even = frame % 2 === 0
 
   switch (activity) {
     case 'idle':
-      // Still, with a blink now and then.
-      return [frame % 12 === 0 ? BLINK : HEAD, BODY, LEGS]
+      // At rest, with a blink now and then.
+      return frame % 12 === 0 ? pose([LEFT_DOWN, BLINK, RIGHT_DOWN], [LEFT_OUT, BODY, RIGHT_OUT]) : REST
     case 'thinking':
-      // A slow bob.
-      return frame % 4 < 2 ? [HEAD, BODY, LEGS] : [BLINK, BODY, LEGS]
+      // A slow blink while it works out what to do.
+      return frame % 4 < 2 ? REST : pose([LEFT_DOWN, BLINK, RIGHT_DOWN], [LEFT_OUT, BODY, RIGHT_OUT])
     case 'writing':
     case 'running':
     case 'reading':
     case 'planning':
-      // Busy feet.
-      return [HEAD, BODY, even ? LEGS : STEP]
+      // All four arms at it, crosswise: the upper left with the lower right, then the others.
+      return even
+        ? pose([LEFT_UP, EYES, RIGHT_DOWN], [LEFT_DOWN, BODY, RIGHT_OUT])
+        : pose([LEFT_DOWN, EYES, RIGHT_UP], [LEFT_OUT, BODY, RIGHT_DOWN])
     case 'done':
-      // Arms up.
-      return [HEAD, even ? ARMS_UP : BODY, LEGS]
+      // All four arms up, and down, and up.
+      return even ? pose([LEFT_UP, EYES, RIGHT_UP], [LEFT_UP, BODY, RIGHT_UP]) : REST
     case 'waiting':
-      // Waving for attention.
-      return [HEAD, even ? WAVE_LEFT : WAVE_RIGHT, LEGS]
-    case 'alert': {
-      // A shake: the whole sprite jumps a column each way.
-      const shake = (row: string) => (even ? ` ${row.slice(0, -1)}` : `${row.slice(1)} `)
-
-      return [shake(HEAD), shake(BODY), shake(LEGS)]
-    }
+      // One arm waving for you.
+      return even ? pose([LEFT_UP, EYES, RIGHT_DOWN], [LEFT_OUT, BODY, RIGHT_OUT]) : REST
+    case 'alert':
+      // Arms flung up and back, blinking: something went wrong.
+      return even
+        ? pose([LEFT_UP, BLINK, RIGHT_UP], [LEFT_UP, BODY, RIGHT_UP])
+        : pose([LEFT_DOWN, EYES, RIGHT_DOWN], [LEFT_DOWN, BODY, RIGHT_DOWN])
   }
 }
 

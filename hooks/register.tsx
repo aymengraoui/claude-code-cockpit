@@ -27,6 +27,7 @@ import { isWindowsPath, launchCommands } from './lib/launch'
 import { heatOf, TOKYO } from './lib/palette'
 import { aboutCall, activityOfTool, CHIME_AFTER_MS, describe, spriteFor } from './lib/mascot'
 import type { MascotActivity } from './lib/mascot'
+import { emphasizeQuestions, errorLines } from './lib/attention'
 import { fromUsage } from './lib/usage'
 
 const PANE = 'cockpit'
@@ -970,16 +971,18 @@ export const register: Register = on => {
     )
   })
 
-  // The band above the prompt: the mascot, what it is doing in words, and a mascot of its
-  // own for every subagent at work. It yields to the engine's surveys, which draw there.
+  // The band above the prompt: a small mascot with what it is doing written under it, and
+  // one more for each subagent at work. Everything sits on the band's bottom edge, against
+  // the input. It yields to the engine's surveys, which draw there.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
 
     const { Box, Text } = $.ui.resolve(e)
     const m = mascotDefaults(await read($, mascot))
     const it = withDefaults(await read($, state))
-    const agents = it.agents.filter(one => one.ms === null).slice(0, 4)
-    const extra = it.agents.filter(one => one.ms === null).length - agents.length
+    const running = it.agents.filter(one => one.ms === null)
+    const agents = running.slice(0, 4)
+    const extra = running.length - agents.length
 
     const colour =
       m.activity === 'alert'
@@ -990,14 +993,6 @@ export const register: Register = on => {
             ? TOKYO.green
             : TOKYO.accent
     const line = describe(m.activity, m.detail)
-    const under =
-      agents.length > 0
-        ? `${agents.length + extra} ${agents.length + extra === 1 ? 'agent' : 'agents'} working`
-        : m.activity === 'waiting'
-          ? 'the session is paused until you answer'
-          : m.activity === 'done'
-            ? 'nothing is running'
-            : ''
 
     // Too little room for the sprite: the words alone, still coloured.
     if (e.props.maxRows < 3) {
@@ -1011,35 +1006,65 @@ export const register: Register = on => {
     }
 
     return (
-      <Box>
+      <Box alignItems="flex-end">
         <Box flexDirection="column">
           {spriteFor(m.activity, m.frame).map((row, index) => (
             <Box key={`me-${index}`}>
               <Text color={colour}>{row}</Text>
             </Box>
           ))}
-        </Box>
-        <Box flexDirection="column" marginLeft={1}>
           <Text color={colour} bold>
-            {shortText(line, Math.max(12, e.props.bodyColumns - 12 - agents.length * 11))}
+            {shortText(line, Math.max(12, e.props.bodyColumns - 2 - agents.length * 12))}
           </Text>
-          {under !== '' && <Text color={TOKYO.dim}>{under}</Text>}
         </Box>
-        {agents.map((agent, index) => (
-          <Box key={`agent-mascot-${agent.id}`} flexDirection="column" marginLeft={2}>
-            {spriteFor('running', m.frame + index * 3).map((row, rowIndex) => (
-              <Box key={`agent-${agent.id}-${rowIndex}`}>
-                <Text color={AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue}>{row}</Text>
-              </Box>
-            ))}
-            {e.props.maxRows >= 4 && (
-              <Text color={AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue}>
-                {shortText(agent.subject, 9)}
-              </Text>
-            )}
+        {agents.map((agent, index) => {
+          const tint = AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue
+
+          return (
+            <Box key={`agent-mascot-${agent.id}`} flexDirection="column" marginLeft={3}>
+              {spriteFor('running', m.frame + index).map((row, rowIndex) => (
+                <Box key={`agent-${agent.id}-${rowIndex}`}>
+                  <Text color={tint}>{row}</Text>
+                </Box>
+              ))}
+              <Text color={tint}>{shortText(agent.subject, 9)}</Text>
+            </Box>
+          )
+        })}
+        {extra > 0 && <Text color={TOKYO.dim}> +{extra}</Text>}
+      </Box>
+    )
+  })
+
+  // Questions the reply puts to you, marked so they are not lost at the end of a long
+  // answer. Only the drawing changes; the stored message is left alone.
+  on('ui.render', { component: 'AssistantMessage' }, ($, e, next) => {
+    const text = emphasizeQuestions(e.props.text)
+
+    return text === e.props.text ? next(e) : next({ ...e, props: { ...e.props, text } })
+  })
+
+  // A failed tool call, loud: what failed, and the first lines of why. Calls that worked
+  // keep the engine's own row.
+  on('ui.render', { component: 'ToolUse' }, ($, e, next) => {
+    if (!e.props.isErrored || e.props.isRunning) return next(e)
+
+    const { Box, Text } = $.ui.resolve(e)
+    const input = (typeof e.props.input === 'object' && e.props.input !== null ? e.props.input : {}) as Record<string, unknown>
+    const what = aboutCall(e.props.tool, subjectOf(e.props.tool, input))
+    const why = errorLines(e.props.output)
+    const width = Math.max(20, (e.viewport?.columns ?? 80) - 6)
+
+    return (
+      <Box flexDirection="column">
+        <Text color={TOKYO.red} bold>
+          ✗ {e.props.tool} failed{what === '' ? '' : ` · ${shortText(what, width - 16)}`}
+        </Text>
+        {why.map((reason, index) => (
+          <Box key={`why-${index}`}>
+            <Text color={TOKYO.red}>{`  ${shortText(reason, width)}`}</Text>
           </Box>
         ))}
-        {extra > 0 && <Text color={TOKYO.dim}> +{extra}</Text>}
       </Box>
     )
   })

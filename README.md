@@ -39,30 +39,37 @@ pane follows whatever theme you run, custom ones included.
 
 ## The mascot
 
-Above the prompt, always in view, a small mascot acts out what the session is doing, with one
-line beside it saying the same in words:
+Right above the input, a small four-armed mascot acts out what the session is doing, with
+what it is doing written underneath. Each subagent at work gets one of its own, in its own
+colour, labelled with its task:
 
 ```
- ▐▛███▜▌   running npm test                         ▐▛███▜▌   ▐▛███▜▌
-▝▜█████▛▘  2 agents working                         ▝▜█████▛▘ ▝▜█████▛▘
-  ▝▘ ▘▝                                               ▘▘ ▝▝    ▝▘ ▘▝
-                                                    find cal…  write t…
+▗▐▛█▜▌▖   ▘▐▛█▜▌▖   ▗▐▛█▜▌▝
+▝▜███▛▘   ▗▜███▛▘   ▝▜███▛▖
+running npm test   find cal…   write t…
 ```
 
-Each subagent at work gets a mascot of its own, in its own colour, labelled with its task.
-
-It is built for attention that drifts. **Motion means something is happening**: the mascot
-moves while work is under way, moves for a few seconds when something changes, then stands
+It is built for attention that drifts. **Motion means something is happening**: the arms
+go while work is under way and for a few seconds after a change, then the mascot stands
 still — idle never moves. **Colour says whose turn it is**: green when done (`✓ done — your
-turn`), red when a step failed (`⚠ failed 1 step: npm test`, kept on show until the next
-prompt), yellow when the session is waiting on you (`⏳ needs you: …`, from a permission prompt).
+turn`), red when a step failed (`⚠ failed 1 step: npm test`, kept until the next prompt),
+yellow when the session is waiting on you (`⏳ needs you: …`).
 
-A soft chime plays when the session needs you, and when a turn that ran longer than 30
-seconds ends — the moments attention has most likely wandered — with a toast to match. Short
-turns stay quiet. In the transcript, the end of each turn is a loud green
-`━━━ ✓ done in 3m 12s ━━━` line, so the start of each answer is easy to find when scrolling.
+A soft chime, with a toast, marks the moments attention has most likely wandered: a
+permission prompt, and the end of a turn that ran longer than 30 seconds. Short turns stay
+quiet.
 
-Nothing is hidden or rewritten: everything Claude Code shows, it still shows.
+## The conversation
+
+The transcript is redrawn, never rewritten — the stored messages are untouched:
+
+- **Questions put to you are marked**: `👉 **Want me to push it?**`, so the decision
+  waiting on you is not lost at the end of a long reply. Code, headings and tables are left
+  alone. This shows on every surface, Remote Control included.
+- **A failed tool call is loud**: `✗ Bash failed · npm test`, in red, with the first lines of
+  why, in place of the quiet row. Calls that worked keep the engine's own row.
+- **The end of each turn is a line you can find**: `━━━ ✓ done in 3m 12s ━━━`, so the start
+  of each answer stands out when scrolling back (terminal only).
 
 ## Install
 

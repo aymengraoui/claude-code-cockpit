@@ -13,6 +13,7 @@ import { effortLabel, withDefaults } from './register'
 import { heatOf, TOKYO } from './lib/palette'
 import { aboutCall, activityOfTool, describe as describeActivity, spriteFor } from './lib/mascot'
 import type { MascotActivity } from './lib/mascot'
+import { emphasizeQuestions, errorLines } from './lib/attention'
 import { subjectOf, todosOf } from './lib/tools'
 import {
   bar,
@@ -901,22 +902,23 @@ const ALL_ACTIVITIES: MascotActivity[] = [
   'idle', 'thinking', 'writing', 'running', 'reading', 'planning', 'done', 'alert', 'waiting',
 ]
 
-test('every frame of every activity is three rows of nine columns', () => {
+test('every frame of every activity is two rows of seven columns', () => {
   for (const activity of ALL_ACTIVITIES) {
     for (let frame = 0; frame < 24; frame += 1) {
       const rows = spriteFor(activity, frame)
-      expect(rows.length).toBe(3)
-      for (const row of rows) expect([...row].length).toBe(9)
+      expect(rows.length).toBe(2)
+      for (const row of rows) expect([...row].length).toBe(7)
     }
   }
 })
 
 test('the mascot moves differently for each kind of moment', () => {
-  // Idle blinks now and then; a failure shakes; done throws its arms up.
+  // Idle blinks now and then; a failure flings its arms; done throws all four up.
   expect(spriteFor('idle', 0)[0]).not.toBe(spriteFor('idle', 1)[0])
   expect(spriteFor('alert', 0)).not.toEqual(spriteFor('alert', 1))
   expect(spriteFor('done', 0)[1]).not.toBe(spriteFor('done', 1)[1])
-  expect(spriteFor('waiting', 0)[1]).not.toBe(spriteFor('waiting', 1)[1])
+  // Waiting waves one upper arm.
+  expect(spriteFor('waiting', 0)[0]).not.toBe(spriteFor('waiting', 1)[0])
 })
 
 test('a tool reads as what the mascot is doing, and that reads as plain words', () => {
@@ -1070,7 +1072,7 @@ test('a subagent at work gets a mascot of its own', async ($, on) => {
   // under load, one run in three.
   let seen: unknown
   for (const deadline = Date.now() + 2000; seen === undefined && Date.now() < deadline; ) {
-    seen = await band.find({ text: '1 agent working' })
+    seen = await band.find({ text: 'find cal…' })
     if (seen === undefined) await new Promise(resolve => setTimeout(resolve, 10))
   }
   expect(seen).toBeDefined()
@@ -1109,4 +1111,109 @@ test('a call is described by what it is: a file by its name, a command by itself
   expect(aboutCall('Bash', 'cd ~/Desktop/Code/claude-code-cockpit && git show v99')).toBe('git show v99')
   expect(aboutCall('Bash', 'cd "C:/My Code/app"; npm test')).toBe('npm test')
   expect(aboutCall('Bash', 'npm run build -- --out ./dist/app')).toBe('npm run build -- --out ./dist/app')
+})
+
+test('the mascot has four arms: a mark at each corner of its two rows', () => {
+  const [top, bottom] = spriteFor('idle', 1)
+  const isArm = (char: string | undefined) => ['▗', '▖', '▝', '▘'].includes(char ?? '')
+
+  for (const row of [top, bottom]) {
+    const chars = [...row]
+    expect(isArm(chars[0])).toBe(true)
+    expect(isArm(chars.at(-1))).toBe(true)
+  }
+})
+
+test('what the mascot is doing is written under it, and the band sits on its bottom edge', async ($, on) => {
+  const { band } = await startBand($, on, { now: 1_000_000 })
+  const root = (await band.drawn()) as { props?: { alignItems?: string } }
+
+  expect(root.props?.alignItems).toBe('flex-end')
+  const [main] = childrenOf(root)
+  const rows = childrenOf(main)
+  // Two sprite rows, then the words.
+  expect(rows.length).toBe(3)
+  expect(JSON.stringify(rows[2])).toContain('ready')
+})
+
+test('a question put to you is marked; code, headings and plain lines are not', () => {
+  const reply = [
+    'Pushed to GitHub.',
+    'Want me to delete the demo file?',
+    '- Should it open a new window?',
+    '## Is this a heading?',
+    '```',
+    'echo "is this code?"',
+    '```',
+    'Do you want **bold** kept?',
+  ].join(String.fromCharCode(10))
+
+  expect(emphasizeQuestions(reply).split(String.fromCharCode(10))).toEqual([
+    'Pushed to GitHub.',
+    '👉 **Want me to delete the demo file?**',
+    '- 👉 **Should it open a new window?**',
+    '## Is this a heading?',
+    '```',
+    'echo "is this code?"',
+    '```',
+    '👉 Do you want **bold** kept?',
+  ])
+  expect(emphasizeQuestions('No questions here.')).toBe('No questions here.')
+})
+
+test('a failed call shows its first lines of output, stderr first', () => {
+  expect(errorLines('one\n\ntwo\nthree\nfour')).toEqual(['one', 'two', 'three'])
+  expect(errorLines({ stdout: 'out', stderr: 'fatal: bad revision' })).toEqual(['fatal: bad revision'])
+  expect(errorLines(null)).toEqual([])
+})
+
+test('a reply is drawn with its questions marked, the stored text untouched', async ($, on) => {
+  let drawn: string | undefined
+  on('ui.render', { component: 'AssistantMessage' }, (_$, e) => {
+    drawn = (e.props as { text: string }).text
+
+    return { type: 'Text', props: {}, children: [] }
+  })
+
+  await $.ui.render({
+    component: 'AssistantMessage',
+    surface: 'terminal',
+    props: { text: 'Done.\nShould I push it?', isFirstOfReply: true },
+  })
+
+  expect(drawn).toBe('Done.\n👉 **Should I push it?**')
+})
+
+test('a failed tool call is drawn loud, with why; one that worked keeps its own row', async ($, on) => {
+  let engineDrew = 0
+  on('ui.render', { component: 'ToolUse' }, () => {
+    engineDrew += 1
+
+    return { type: 'Text', props: {}, children: [] }
+  })
+
+  const failed = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'ToolUse',
+    props: {
+      tool: 'Bash',
+      input: { command: 'cd /repo && git show v99' },
+      isRunning: false,
+      isErrored: true,
+      isInterrupted: false,
+      output: { stdout: '', stderr: "fatal: ambiguous argument 'v99'" },
+    },
+  })
+  expect(await failed.find({ text: '✗ Bash failed · git show v99' })).toBeDefined()
+  expect(await failed.find({ text: /fatal: ambiguous argument/ })).toBeDefined()
+  expect(engineDrew).toBe(0)
+
+  await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'ToolUse',
+    props: { tool: 'Bash', input: { command: 'ls' }, isRunning: false, isErrored: false, isInterrupted: false },
+  })
+  expect(engineDrew).toBe(1)
 })
