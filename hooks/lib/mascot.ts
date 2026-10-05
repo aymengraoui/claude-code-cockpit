@@ -21,14 +21,14 @@ export const activityOfTool = (tool: string): MascotActivity => {
 
 // Two rows, five columns, four arms: a dash at each end of each row is an arm, the middle
 // the head (its eyes) and the body. An arm is stretched out, or pulled in to the half of the
-// cell against the body — still a dash, so the arms can move. Every frame keeps that size.
+// cell against the body — still a heavy dash, so the arms can move. Every frame keeps that size.
 const EYES = '▛█▜'
 const BLINK = '▀█▀'
 const BODY = '▜█▛'
 
-const OUT = '─'
-const LEFT_IN = '╶'
-const RIGHT_IN = '╴'
+const OUT = '━'
+const LEFT_IN = '╺'
+const RIGHT_IN = '╸'
 
 /** One row: its left arm stretched or pulled in, the middle, its right arm. */
 const row = (left: boolean, middle: string, right: boolean): string =>

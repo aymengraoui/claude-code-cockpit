@@ -49,7 +49,7 @@ of its own to its left, in its own colour, labelled with its task:
                              find cal…  write t…   running npm test
 ```
 
-Its four arms are dashes at the ends of its two rows, stretched out or pulled in. It is built
+Its four arms are heavy dashes at the ends of its two rows, stretched out or pulled in. It is built
 for attention that drifts. **Motion means something is happening**: the arms go while work
 is under way and for a few seconds after a change, then the mascot stands
 still — idle never moves. **Colour says whose turn it is**: green when done (`✓ done — your
