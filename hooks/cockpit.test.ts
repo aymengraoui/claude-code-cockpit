@@ -902,12 +902,12 @@ const ALL_ACTIVITIES: MascotActivity[] = [
   'idle', 'thinking', 'writing', 'running', 'reading', 'planning', 'done', 'alert', 'waiting',
 ]
 
-test('every frame of every activity is three rows of nine columns', () => {
+test('every frame of every activity is two rows of five columns', () => {
   for (const activity of ALL_ACTIVITIES) {
     for (let frame = 0; frame < 24; frame += 1) {
       const rows = spriteFor(activity, frame)
-      expect(rows.length).toBe(3)
-      for (const row of rows) expect([...row].length).toBe(9)
+      expect(rows.length).toBe(2)
+      for (const row of rows) expect([...row].length).toBe(5)
     }
   }
 })
@@ -917,7 +917,7 @@ test('the mascot moves differently for each kind of moment', () => {
   expect(spriteFor('idle', 0)[0]).not.toBe(spriteFor('idle', 1)[0])
   expect(spriteFor('alert', 0)).not.toEqual(spriteFor('alert', 1))
   expect(spriteFor('done', 0)[1]).not.toBe(spriteFor('done', 1)[1])
-  expect(spriteFor('waiting', 0)[1]).not.toBe(spriteFor('waiting', 1)[1])
+  expect(spriteFor('waiting', 0)[0]).not.toBe(spriteFor('waiting', 1)[0])
 })
 
 test('a tool reads as what the mascot is doing, and that reads as plain words', () => {
@@ -1113,9 +1113,9 @@ test('the mascot lives at the right, on the bottom edge, its words under it', as
   expect((root.props as { width?: number }).width).toBe(BAND_PROPS.bodyColumns)
   const main = childrenOf(root).at(-1)
   const rows = childrenOf(main)
-  // Three sprite rows, then the words.
-  expect(rows.length).toBe(4)
-  expect(JSON.stringify(rows[3])).toContain('ready')
+  // Two sprite rows, then the words.
+  expect(rows.length).toBe(3)
+  expect(JSON.stringify(rows[2])).toContain('ready')
 })
 
 test('a question put to you is marked; code, headings and plain lines are not', () => {
@@ -1200,7 +1200,7 @@ test('a failed tool call is drawn loud, with why; one that worked keeps its own 
   expect(engineDrew).toBe(1)
 })
 
-test('the mascot has four arms: a pair at the head and a pair at the body', () => {
+test('the half-size mascot keeps four arms: a pair at the head and a pair at the body', () => {
   const [head, body] = spriteFor('idle', 1)
   const isArm = (char: string | undefined) => ['▗', '▖', '▝', '▘'].includes(char ?? '')
 
