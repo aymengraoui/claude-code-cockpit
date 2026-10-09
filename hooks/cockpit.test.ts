@@ -437,7 +437,8 @@ test("the pane lists Claude Code's sessions from every project, and all of them 
     surface: 'terminal',
     component: 'Pane',
     requestId: 'cockpit',
-    props: PANE_PROPS,
+    // Wide enough that a block's border and padding leave every title whole.
+    props: { ...PANE_PROPS, bodyColumns: 40 },
   })
 
   expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
@@ -937,7 +938,7 @@ test('the model and effort lead the pane; the quick actions are pinned to its bo
   // something that scrolls away with the content above it.
   expect(root.props?.height).toBe(PANE_PROPS.scroll.bodyRows)
 
-  const [content, , actions] = childrenOf(root)
+  const [content, actions] = childrenOf(root)
   expect((content as { props?: { flexGrow?: number } }).props?.flexGrow).toBe(1)
   expect(JSON.stringify(content)).toContain('"key":"model"')
   expect(JSON.stringify(content)).toContain('"key":"effort"')
@@ -973,9 +974,24 @@ test('the content keeps a gutter from the edge that resizes the pane', async ($,
 
   expect(root.props?.paddingLeft).toBe(2)
 
-  // The gutter is taken out of the width, so a rule still fits on one line.
-  const rule = JSON.stringify(root).match(/"(─+)"/)?.[1] ?? ''
-  expect(rule.length).toBe(PANE_PROPS.bodyColumns - 2)
+  // The gutter is taken out of the width, so every block still fits on one line.
+  const bottoms = JSON.stringify(root).match(/"╰─*╯"/g) ?? []
+  expect(bottoms.length).toBeGreaterThan(3)
+  for (const bottom of bottoms) expect(bottom.length - 2).toBe(PANE_PROPS.bodyColumns - 2)
+})
+
+test('every block is framed, its title set into the top edge, each in its own colour', async ($, on) => {
+  const ui = await startPane($, on)
+  const drawn = JSON.stringify(await ui.drawn())
+
+  const tops = drawn.match(/"╭─ "/g) ?? []
+  const bottoms = drawn.match(/"╰─*╯"/g) ?? []
+  expect(tops.length).toBe(bottoms.length)
+  for (const title of ['SESSION', 'USAGE', 'CONTEXT ROLLOVER', 'WORKING TREE', 'SESSIONS', 'ACTIONS']) {
+    expect(await ui.find({ text: title })).toBeDefined()
+  }
+  expect(drawn).toContain('#7aa2f7')
+  expect(drawn).toContain('#9ece6a')
 })
 
 const ALL_ACTIVITIES: MascotActivity[] = [

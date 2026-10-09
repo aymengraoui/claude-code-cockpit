@@ -7,33 +7,41 @@ context is, what the session has cost, which files changed, what Claude just ran
 subagent is still going. `cockpit` puts all of it in a pane beside the conversation.
 
 ```
-╭─ cockpit ──────────────────────────╮
-│ my-app · 7 turns                   │
-│ Opus 5.5 ▾ · High ▾ · auto mode on │
-│ ────────────────────────────────── │
-│ ctx  ▰▰▱▱▱  37% 74k/200k ▾         │
-│   ▰▱▱ System tools 14k             │
-│   ▰▱▱ Messages 9k                  │
-│ 5h   ▰▱▱▱▱  12% ↻ 2h14             │
-│ week ▰▰▰▰▱  81% ↻ 4d               │
-│ ────────────────────────────────── │
-│ my-app · feat/parser ↑2            │
-│ WORKING TREE 3                     │
-│ +169 -12 in 3 files                │
-│ ● M src/parse.ts          +48 -12  │
-│ ● M src/parse.test.ts     +31  -0  │
-│   ? notes.md               +0  -0  │
-│ ────────────────────────────────── │
-│ SESSIONS 4                         │
-│ ▸ enhance the cockpit              │
-│   fix the parser rounding          │
-│                                    │
-│ ────────────────────────────────── │
-│ new · compact · rewind · resume ·… │
-╰────────────────────────────────────╯
+╭─ SESSION 7 turns ──────────────╮
+│ my-app                         │
+│ Opus 5.5 ▾ · High ▾ · auto     │
+╰────────────────────────────────╯
+╭─ USAGE ────────────────────────╮
+│ ctx  ▰▰▱▱▱  37% 74k/200k ▾     │
+│   ▰▱▱ System tools 14k         │
+│ 5h   ▰▱▱▱▱  12% ↻ 2h14         │
+│ week ▰▰▰▰▱  81% ↻ 4d           │
+╰────────────────────────────────╯
+╭─ CONTEXT ROLLOVER ─────────────╮
+│ Status   MONITORING            │
+│ Context  142k / 200k           │
+│ Progress ▰▰▰▰▰▰▰▱▱▱ 71%        │
+│ Next     180k · 38k left       │
+│ Handoff  Not started           │
+╰────────────────────────────────╯
+╭─ WORKING TREE 3 ───────────────╮
+│ my-app · feat/parser ↑2        │
+│ +79 -12 in 3 files             │
+│ ● M src/parse.ts      +48 -12  │
+│ ● M src/parse.test.ts +31  -0  │
+│   ? notes.md           +0  -0  │
+╰────────────────────────────────╯
+╭─ SESSIONS 9 · all › ───────────╮
+│ ▸ enhance the cockpit    now   │
+│   fix the parser rounding 2h   │
+╰────────────────────────────────╯
+╭─ ACTIONS ──────────────────────╮
+│ new · compact · rewind · resu… │
+╰────────────────────────────────╯
 ```
 
-`●` marks a file this session wrote to, so your edits stand out from whatever else is dirty in
+Each block is framed in its own colour, its title set into the top edge, so the pane reads as
+separate parts at a glance. `●` marks a file this session wrote to, so your edits stand out from whatever else is dirty in
 the tree. Percentages go green → amber → red as they climb. Every color is a theme key, so the
 pane follows whatever theme you run, custom ones included.
 
@@ -112,6 +120,7 @@ process it ever starts is `git`:
 | what fills the context | `$.session.usage({ breakdown: 'summary' })`, the categories `/context` counts |
 | running agents | `tool.call` on the `Agent` tool, timed around `next(e)` |
 | Claude Code's sessions | the transcripts in every project's transcript directory, found beside the `transcript_path` the classic hook inputs carry |
+| context rollover | `$.state` `context-rollover.status`, published by the [context-rollover](../claude-code-context-rollover) mod |
 
 The session list is Claude Code's own, not the mod's bookkeeping: what `/resume` lists. Claude
 Code writes one `<session-id>.jsonl` per session into a per-project directory, all of them side
@@ -169,6 +178,33 @@ command goes to the clipboard instead, so a click is never lost.
 
 Two read-only `git` calls per completed turn, not per edit — the pane costs a few milliseconds
 a turn and never writes to your repo.
+
+## The context rollover block
+
+**CONTEXT ROLLOVER** shows the lifecycle of the
+[context-rollover](../claude-code-context-rollover) mod, which moves long-running work into a
+fresh session before the context grows too large. The cockpit only **observes**: that mod is
+the single source of truth and writes `$.state` `context-rollover.status`. The pane reads that
+value while drawing, so the host redraws it on every write, with no polling of its own. Nothing
+in the cockpit can start, stop or change a rollover.
+
+| Row | Shows |
+| --- | --- |
+| Status | `MONITORING · PREPARING · READY · DRAINING · PERSISTING · RESTARTING · RESUMING · COMPLETED · AWAITING /clear · FAILED · DISABLED`, or `STALE` |
+| Context | the current session's context tokens over the configured hard limit; `UNKNOWN` before its first response |
+| Progress | tokens ÷ hard limit, clamped to 0–100%, coloured by the configured thresholds |
+| Next | the next threshold above the reading, and how far off it is |
+| Handoff | the continuation: not started, in progress, draft saved, persisted, pending, restored |
+| Agents · Tasks | counts by status, as the rollover mod reads them; `UNAVAILABLE` when it cannot |
+| Last | the previous rollover's outcome and when; after a rollover, Context is the *new* session's |
+| Next action | what the rollover mod is doing now, or will do next |
+| Error | the last error, when there is one |
+
+Every read is validated against the contract's schema version (`hooks/lib/rollover.ts`; the
+types are an observer's copy in `types/rollover.d.ts`). A missing value (that mod not
+installed or not loaded) draws `UNAVAILABLE` and a reason. So does a malformed value or an
+unknown schema. A writer whose heartbeat is more than 45 s old draws `STALE`, with its figures
+dimmed. The rest of the pane is unaffected either way.
 
 ## How it is built
 

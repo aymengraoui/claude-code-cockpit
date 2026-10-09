@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { Activity, Cockpit, ContextRow, MascotState, OpenDiff, Past, Repo, Todo } from '../types'
 import {
@@ -34,6 +34,7 @@ import { aboutCall, activityOfTool, CHIME_AFTER_MS, describe, spriteFor } from '
 import type { MascotActivity } from './lib/mascot'
 import { emphasizeQuestions, errorLines } from './lib/attention'
 import { fromUsage } from './lib/usage'
+import { labelOf, rolloverBar, rolloverView } from './lib/rollover'
 
 const PANE = 'cockpit'
 
@@ -51,6 +52,8 @@ const REPO = 'cockpit.repoDir'
 const ARM_MS = 4000
 /** Columns of space between the pane's edge — the line that resizes it — and the content. */
 const GUTTER = 2
+/** Columns a block's border and padding take from its width: one of each, either side. */
+const BLOCK_INSET = 4
 /** The quick actions, each the engine's own command; the one that discards comes last. */
 const QUICK_ACTIONS = ['new', 'compact', 'rewind', 'resume', 'clear'] as const
 /** How fast the mascot moves: a frame every this many milliseconds. */
@@ -67,6 +70,17 @@ const CHIME = 'sounds/chime.wav'
 const COMPACT_AT = 85
 /** Colours the context breakdown's rows take in turn. */
 const ROW_COLOURS = [TOKYO.blue, TOKYO.accent, TOKYO.cyan, TOKYO.green, TOKYO.yellow, TOKYO.orange]
+/** Each block's colour, so the pane reads as distinct parts at a glance. */
+const BLOCK = {
+  session: TOKYO.accent,
+  usage: TOKYO.blue,
+  rollover: TOKYO.cyan,
+  tree: TOKYO.green,
+  plan: TOKYO.yellow,
+  agents: TOKYO.orange,
+  sessions: TOKYO.red,
+  actions: TOKYO.dim,
+} as const
 /** How often the pane's clocks and figures are refreshed while it is open. */
 const TICK_MS = 2000
 
@@ -722,7 +736,8 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
-    const input = e.input as Record<string, unknown>
+    // This build carries a tool's arguments on `e` itself; an older one carried them under `input`.
+    const input = ((e as { input?: unknown }).input ?? e) as Record<string, unknown>
     const subject = subjectOf(e.tool, input)
     const entry: Activity = { id: e.tool_use_id, tool: e.tool, subject, ms: null, isError: null }
     const isAgent = e.tool === 'Agent'
@@ -818,17 +833,24 @@ export const register: Register = on => {
     const { Box, Button, Code, Text } = $.ui.resolve(e)
     const now = Date.now()
     const it = withDefaults(await read($, state))
-    // The gutter comes out of the width, so every row and rule still fits on one line.
-    const columns = Math.max(24, (e.props.bodyColumns ?? 32) - GUTTER)
+    // The gutter comes out of the width, so every block still fits on one line.
+    const outer = Math.max(24, (e.props.bodyColumns ?? 32) - GUTTER)
+    // What a block holds: its border and a column of padding come off each side.
+    const columns = outer - BLOCK_INSET
     const rows = Math.max(8, e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 24)
 
     const changes = it.repo?.changes ?? []
     const open = it.todos.filter(one => one.status !== 'completed')
     const doneCount = it.todos.length - open.length
 
+    // The context-rollover mod's shared state. Reading it here subscribes the pane, so
+    // each write that mod makes redraws it; the cockpit itself only observes.
+    const rolled = await $.state.get({ plugin: 'context-rollover', key: 'status' }).catch(() => undefined)
+    const rollover = rolloverView(rolled?.value, now, columns)
+    const rolloverRows = rollover.kind === 'unavailable' ? 3 : rollover.rows.length + 2
+
     // The lists share what is left under the fixed rows; each keeps at least two.
-    const listRoom = Math.max(3, Math.floor((rows - 18) / 2))
-    const rule = '─'.repeat(columns)
+    const listRoom = Math.max(3, Math.floor((rows - 25 - rolloverRows) / 2))
     const repoName = shortText(it.repo?.root.split('/').at(-1) ?? '', Math.max(6, Math.floor(columns / 2)))
     const isArmed = (action: string): boolean =>
       it.armed !== null && it.armed.action === action && now - it.armed.at <= ARM_MS
@@ -841,14 +863,71 @@ export const register: Register = on => {
     const added = changes.reduce((sum, one) => sum + one.added, 0)
     const removed = changes.reduce((sum, one) => sum + one.removed, 0)
 
-    const Head = ({ title, count }: { title: string; count?: number | string }) => (
-      <Box>
-        <Text color={TOKYO.dim} bold>
-          {title}
-        </Text>
-        {count !== undefined && <Text color={TOKYO.dim}> {count}</Text>}
-      </Box>
-    )
+    /**
+     * A block: a rounded frame in its own colour, the title set into the top edge,
+     * `╭─ TITLE 3 ───╮`. Every line of the frame is text the cockpit draws itself, so it
+     * looks the same on any surface. `rows` are one line each (or `body`, one element); `height` pins the body to
+     * that many lines (a list padded, a diff cut), and `extra` (a button) follows the
+     * title on the top edge, `extraWidth` columns wide.
+     */
+    const Section = ({
+      id,
+      title,
+      count,
+      color,
+      rows: lines = [],
+      body,
+      height,
+      extra,
+      extraWidth = 0,
+    }: {
+      id: string
+      title: string
+      count?: number | string
+      color: string
+      rows?: RenderChildren[]
+      body?: RenderChildren
+      height?: number
+      extra?: RenderChildren
+      extraWidth?: number
+    }) => {
+      const label = shortText(title, Math.max(4, outer - 8 - extraWidth))
+      const tail = count === undefined ? '' : ` ${count}`
+      const fill = Math.max(1, outer - 5 - label.length - tail.length - extraWidth)
+      const n = Math.max(1, height ?? lines.length)
+      const side = (glyph: string) => Array.from({ length: n }, () => glyph).join('\n')
+
+      return (
+        <Box key={`block-${id}`} flexDirection="column" width={outer} flexShrink={0}>
+          <Box height={1}>
+            <Text color={color}>{'╭─ '}</Text>
+            <Text color={color} bold>
+              {label}
+            </Text>
+            {tail !== '' && <Text color={TOKYO.dim}>{tail}</Text>}
+            {extra}
+            <Text color={color}>{` ${'─'.repeat(fill)}╮`}</Text>
+          </Box>
+          <Box height={n}>
+            <Text color={color}>{side('│ ')}</Text>
+            <Box flexDirection="column" width={columns} height={n} overflow="hidden">
+              {body ??
+                lines.map((line, index) => (
+                  <Box key={`${id}-${index}`} height={1} overflow="hidden">
+                    {line}
+                  </Box>
+                ))}
+            </Box>
+            <Text color={color}>{side(' │')}</Text>
+          </Box>
+          <Text color={color}>{`╰${'─'.repeat(outer - 2)}╯`}</Text>
+        </Box>
+      )
+    }
+
+    /** What a block shows, the rows a condition left out dropped. */
+    const only = (...items: RenderChildren[]): RenderChildren[] =>
+      items.filter(item => item !== false && item !== null && item !== undefined)
 
     const Meter = ({
       label,
@@ -896,44 +975,51 @@ export const register: Register = on => {
     }
 
     if (it.sessionsPage !== null) {
-      // Everything but the heading, the two rules and the footer is the list.
+      // Everything but the list's frame and the footer block is the list.
       const perPage = Math.max(3, rows - 5)
       const pages = Math.max(1, Math.ceil(it.history.length / perPage))
       const page = Math.min(it.sessionsPage, pages - 1)
       const shown = it.history.slice(page * perPage, (page + 1) * perPage)
       const toPage = (to: number) => update($, state, prev => ({ ...prev, sessionsPage: to }))
+      const pageNote = pages > 1 ? ` · page ${page + 1}/${pages}` : ''
 
       return (
         <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
-          <Box flexDirection="column" flexGrow={1} overflow="hidden">
-            <Box>
-              {Head({ title: 'ALL SESSIONS', count: it.history.length })}
-              {pages > 1 && <Text color={TOKYO.dim}> · page {page + 1}/{pages}</Text>}
-            </Box>
-            <Text color={TOKYO.line}>{rule}</Text>
-            {shown.map(past => SessionRow({ past }))}
-          </Box>
-          <Text color={TOKYO.line}>{rule}</Text>
-          <Box>
-            <Button
-              key="sessions-close"
-              plain
-              label="← back"
-              onPress={() => update($, state, prev => ({ ...prev, sessionsPage: null }))}
-            />
-            {page > 0 && (
+          {Section({
+            id: 'all-sessions',
+            title: 'ALL SESSIONS',
+            count: `${it.history.length}${pageNote}`,
+            color: BLOCK.sessions,
+            height: perPage,
+            rows: shown.map(past => SessionRow({ past })),
+          })}
+          {Section({
+            id: 'sessions-actions',
+            title: 'ACTIONS',
+            color: BLOCK.actions,
+            rows: [
               <Box>
-                <Text color={TOKYO.dim}> · </Text>
-                <Button key="sessions-prev" plain label="‹ newer" onPress={() => toPage(page - 1)} />
-              </Box>
-            )}
-            {page < pages - 1 && (
-              <Box>
-                <Text color={TOKYO.dim}> · </Text>
-                <Button key="sessions-next" plain label="older ›" onPress={() => toPage(page + 1)} />
-              </Box>
-            )}
-          </Box>
+                <Button
+                  key="sessions-close"
+                  plain
+                  label="← back"
+                  onPress={() => update($, state, prev => ({ ...prev, sessionsPage: null }))}
+                />
+                {page > 0 && (
+                  <Box>
+                    <Text color={TOKYO.dim}> · </Text>
+                    <Button key="sessions-prev" plain label="‹ newer" onPress={() => toPage(page - 1)} />
+                  </Box>
+                )}
+                {page < pages - 1 && (
+                  <Box>
+                    <Text color={TOKYO.dim}> · </Text>
+                    <Button key="sessions-next" plain label="older ›" onPress={() => toPage(page + 1)} />
+                  </Box>
+                )}
+              </Box>,
+            ],
+          })}
         </Box>
       )
     }
@@ -943,137 +1029,184 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
-          <Box flexDirection="column" flexGrow={1} overflow="hidden">
-            <Text color={TOKYO.text}>{shortPath(path, Math.max(8, columns))}</Text>
-            <Text color={TOKYO.line}>{rule}</Text>
-            <Code source={source} path={path} format={format} wrap="truncate-end" />
-          </Box>
-          <Text color={TOKYO.line}>{rule}</Text>
-          <Button
-            key="diff-close"
-            plain
-            label="← back"
-            onPress={() => update($, state, prev => ({ ...prev, diff: null }))}
-          />
+          {Section({
+            id: 'diff',
+            title: shortPath(path, Math.max(8, outer - 8)),
+            color: BLOCK.tree,
+            height: Math.max(3, rows - 5),
+            body: <Code source={source} path={path} format={format} wrap="truncate-end" />,
+          })}
+          {Section({
+            id: 'diff-actions',
+            title: 'ACTIONS',
+            color: BLOCK.actions,
+            rows: [
+              <Button
+                key="diff-close"
+                plain
+                label="← back"
+                onPress={() => update($, state, prev => ({ ...prev, diff: null }))}
+              />,
+            ],
+          })}
         </Box>
       )
     }
 
+    const contextRows: RenderChildren[] =
+      it.context === null
+        ? [<Text color={TOKYO.dim}>ctx   waiting for the first response</Text>]
+        : [
+            <Box>
+              {Meter({
+                label: 'ctx',
+                percent: it.context,
+                note: it.tokens === null || it.window === null ? undefined : `${kilo(it.tokens)}/${kilo(it.window)}`,
+              })}
+              <Button
+                key="ctx"
+                plain
+                label={it.contextRows === null ? ' ▸' : ' ▾'}
+                onPress={async () => {
+                  const isOpen = withDefaults(await read($, state)).contextRows !== null
+                  const rows = isOpen ? null : await readContextRows($)
+                  await update($, state, prev => ({ ...prev, contextRows: rows }))
+                }}
+              />
+            </Box>,
+            ...(it.contextRows ?? []).slice(0, 8).map((row, index) => (
+              <Box>
+                <Text color={TOKYO.dim}>{'  '}</Text>
+                <Text color={ROW_COLOURS[index % ROW_COLOURS.length] ?? TOKYO.blue}>
+                  {bar(it.window === null ? 0 : (row.tokens / it.window) * 100, 3)}
+                </Text>
+                <Text color={TOKYO.text}> {shortText(row.name, Math.max(6, columns - 14))}</Text>
+                <Text color={TOKYO.dim}> {kilo(row.tokens)}</Text>
+              </Box>
+            )),
+          ]
+
+    const treeRows: RenderChildren[] =
+      it.repo === null
+        ? [<Text color={TOKYO.dim}>{it.isRepoChecked ? 'not a git repository' : 'reading git…'}</Text>]
+        : [
+            <Box>
+              <Text color={TOKYO.text}>{repoName}</Text>
+              <Text color={TOKYO.dim}> · </Text>
+              <Text color={TOKYO.blue}>
+                {shortText(it.repo.branch ?? 'detached', Math.max(8, columns - repoName.length - 8))}
+              </Text>
+              {it.repo.ahead > 0 && <Text color={TOKYO.green}> ↑{it.repo.ahead}</Text>}
+              {it.repo.behind > 0 && <Text color={TOKYO.yellow}> ↓{it.repo.behind}</Text>}
+            </Box>,
+            <Box>
+              <Text color={TOKYO.green}>+{added}</Text>
+              <Text color={TOKYO.red}> -{removed}</Text>
+              <Text color={TOKYO.dim}>
+                {' '}
+                in {changes.length} {changes.length === 1 ? 'file' : 'files'}
+              </Text>
+            </Box>,
+            ...changes.slice(0, listRoom).map(change => (
+              <Box>
+                <Text color={change.isMine ? TOKYO.orange : TOKYO.dim}>{change.isMine ? '●' : ' '}</Text>
+                <Text color={change.status === '?' ? TOKYO.dim : TOKYO.yellow}>{change.status} </Text>
+                <Button
+                  key={`diff-${change.path}`}
+                  plain
+                  label={shortPath(change.path, Math.max(6, columns - 14)).padEnd(Math.max(7, columns - 13))}
+                  onPress={() => openDiff($, it.repo?.root ?? '', change.path, change.status === '?')}
+                />
+                <Text color={TOKYO.green}>+{change.added}</Text>
+                <Text color={TOKYO.red}> -{change.removed}</Text>
+              </Box>
+            )),
+          ]
+
+    const hasMore = it.history.length > SESSIONS_SHOWN
+
     return (
       <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
         <Box flexDirection="column" flexGrow={1} overflow="hidden">
-          <Box>
-            <Text color={TOKYO.text} bold>
-              {it.project ?? 'claude'}
-            </Text>
-            {it.turns !== null && <Text color={TOKYO.dim}> · {it.turns} turns</Text>}
-          </Box>
-          <Box>
-            <Button
-              key="model"
-              plain
-              label={`${it.model ?? 'model'} ▾`}
-              onPress={() => runCommand($, 'model')}
-            />
-            <Text color={TOKYO.dim}> · </Text>
-            <Button
-              key="effort"
-              plain
-              label={`${it.effort === null ? 'effort' : effortLabel(it.effort)} ▾`}
-              onPress={() => runCommand($, 'effort')}
-            />
-            {it.mode !== null && <Text color={TOKYO.accent}> · {footerMode(it.mode)}</Text>}
-          </Box>
-
-          <Text color={TOKYO.line}>{rule}</Text>
-
-          {it.context === null ? (
-            <Text color={TOKYO.dim}>ctx   waiting for the first response</Text>
-          ) : (
-            <Box flexDirection="column">
+          {Section({
+            id: 'session',
+            title: 'SESSION',
+            count: it.turns === null ? undefined : `${it.turns} turns`,
+            color: BLOCK.session,
+            rows: [
+              <Text color={TOKYO.text} bold>
+                {shortText(it.project ?? 'claude', columns)}
+              </Text>,
               <Box>
-                {Meter({
-                  label: 'ctx',
-                  percent: it.context,
-                  note:
-                    it.tokens === null || it.window === null
-                      ? undefined
-                      : `${kilo(it.tokens)}/${kilo(it.window)}`,
-                })}
                 <Button
-                  key="ctx"
+                  key="model"
                   plain
-                  label={it.contextRows === null ? ' ▸' : ' ▾'}
-                  onPress={async () => {
-                    const isOpen = withDefaults(await read($, state)).contextRows !== null
-                    const rows = isOpen ? null : await readContextRows($)
-                    await update($, state, prev => ({ ...prev, contextRows: rows }))
-                  }}
+                  label={`${it.model ?? 'model'} ▾`}
+                  onPress={() => runCommand($, 'model')}
                 />
-              </Box>
-              {it.contextRows !== null &&
-                it.contextRows.slice(0, 8).map((row, index) => (
-                  <Box key={`ctx-row-${row.name}`}>
-                    <Text color={TOKYO.dim}>{'  '}</Text>
-                    <Text color={ROW_COLOURS[index % ROW_COLOURS.length] ?? TOKYO.blue}>
-                      {bar(it.window === null ? 0 : (row.tokens / it.window) * 100, 3)}
-                    </Text>
-                    <Text color={TOKYO.text}> {shortText(row.name, Math.max(6, columns - 14))}</Text>
-                    <Text color={TOKYO.dim}> {kilo(row.tokens)}</Text>
-                  </Box>
-                ))}
-            </Box>
-          )}
-          {it.fiveHour !== null &&
-            Meter({ label: '5h', percent: it.fiveHour.percent, resetsAt: it.fiveHour.resetsAt })}
-          {it.sevenDay !== null &&
-            Meter({ label: 'week', percent: it.sevenDay.percent, resetsAt: it.sevenDay.resetsAt })}
-          <Text color={TOKYO.line}>{rule}</Text>
-          {it.repo === null ? (
-            <Text color={TOKYO.dim}>{it.isRepoChecked ? 'not a git repository' : 'reading git…'}</Text>
-          ) : (
-            <Box flexDirection="column">
-              <Box>
-                <Text color={TOKYO.text}>{repoName}</Text>
                 <Text color={TOKYO.dim}> · </Text>
-                <Text color={TOKYO.blue}>
-                  {shortText(it.repo.branch ?? 'detached', Math.max(8, columns - repoName.length - 8))}
-                </Text>
-                {it.repo.ahead > 0 && <Text color={TOKYO.green}> ↑{it.repo.ahead}</Text>}
-                {it.repo.behind > 0 && <Text color={TOKYO.yellow}> ↓{it.repo.behind}</Text>}
-              </Box>
-              {Head({ title: "WORKING TREE", count: changes.length })}
-              <Box>
-                <Text color={TOKYO.green}>+{added}</Text>
-                <Text color={TOKYO.red}> -{removed}</Text>
-                <Text color={TOKYO.dim}>
-                  {' '}
-                  in {changes.length} {changes.length === 1 ? 'file' : 'files'}
-                </Text>
-              </Box>
-              {changes.slice(0, listRoom).map(change => (
-                <Box key={`change-${change.path}`}>
-                  <Text color={change.isMine ? TOKYO.orange : TOKYO.dim}>{change.isMine ? '●' : ' '}</Text>
-                  <Text color={change.status === '?' ? TOKYO.dim : TOKYO.yellow}>{change.status} </Text>
-                  <Button
-                    key={`diff-${change.path}`}
-                    plain
-                    label={shortPath(change.path, Math.max(6, columns - 14)).padEnd(Math.max(7, columns - 13))}
-                    onPress={() => openDiff($, it.repo?.root ?? '', change.path, change.status === '?')}
-                  />
-                  <Text color={TOKYO.green}>+{change.added}</Text>
-                  <Text color={TOKYO.red}> -{change.removed}</Text>
-                </Box>
-              ))}
-            </Box>
-          )}
+                <Button
+                  key="effort"
+                  plain
+                  label={`${it.effort === null ? 'effort' : effortLabel(it.effort)} ▾`}
+                  onPress={() => runCommand($, 'effort')}
+                />
+                {it.mode !== null && <Text color={TOKYO.accent}> · {footerMode(it.mode)}</Text>}
+              </Box>,
+            ],
+          })}
 
-          {it.todos.length > 0 && (
-            <Box flexDirection="column">
-              <Text color={TOKYO.line}>{rule}</Text>
-              {Head({ title: "PLAN", count: `${doneCount}/${it.todos.length}` })}
-              {open.slice(0, listRoom + 1).map((todo, index) => (
-                <Box key={`todo-${index}`}>
+          {Section({
+            id: 'usage',
+            title: 'USAGE',
+            color: BLOCK.usage,
+            rows: only(
+              ...contextRows,
+              it.fiveHour !== null &&
+                Meter({ label: '5h', percent: it.fiveHour.percent, resetsAt: it.fiveHour.resetsAt }),
+              it.sevenDay !== null &&
+                Meter({ label: 'week', percent: it.sevenDay.percent, resetsAt: it.sevenDay.resetsAt }),
+            ),
+          })}
+
+          {Section({
+            id: 'rollover',
+            title: 'CONTEXT ROLLOVER',
+            color: BLOCK.rollover,
+            rows:
+              rollover.kind === 'unavailable'
+                ? [
+                    <Box>
+                      <Text color={TOKYO.dim}>{labelOf('Status', columns)}</Text>
+                      <Text color={TOKYO.dim}>UNAVAILABLE</Text>
+                    </Box>,
+                    <Text color={TOKYO.dim}>{shortText(rollover.reason, columns)}</Text>,
+                  ]
+                : rollover.rows.map(row => (
+                    <Box>
+                      <Text color={TOKYO.dim}>{labelOf(row.label, columns)}</Text>
+                      {row.bar !== undefined && <Text color={row.bar.color}>{rolloverBar(row.bar.percent)} </Text>}
+                      <Text color={row.color}>{row.value}</Text>
+                    </Box>
+                  )),
+          })}
+
+          {Section({
+            id: 'tree',
+            title: 'WORKING TREE',
+            count: it.repo === null ? undefined : changes.length,
+            color: BLOCK.tree,
+            rows: treeRows,
+          })}
+
+          {it.todos.length > 0 &&
+            Section({
+              id: 'plan',
+              title: 'PLAN',
+              count: `${doneCount}/${it.todos.length}`,
+              color: BLOCK.plan,
+              rows: open.slice(0, listRoom + 1).map(todo => (
+                <Box>
                   <Text color={todo.status === 'in_progress' ? TOKYO.orange : TOKYO.dim}>
                     {todo.status === 'in_progress' ? '▸ ' : '· '}
                   </Text>
@@ -1081,29 +1214,33 @@ export const register: Register = on => {
                     {shortText(todo.content, Math.max(6, columns - 3))}
                   </Text>
                 </Box>
-              ))}
-            </Box>
-          )}
+              )),
+            })}
 
-          {it.agents.length > 0 && (
-            <Box flexDirection="column">
-              <Text color={TOKYO.line}>{rule}</Text>
-              {Head({ title: "AGENTS", count: it.agents.filter(one => one.ms === null).length })}
-              {it.agents.slice(-3).map(agent => (
-                <Box key={`agent-${agent.id}`}>
+          {it.agents.length > 0 &&
+            Section({
+              id: 'agents',
+              title: 'AGENTS',
+              count: it.agents.filter(one => one.ms === null).length,
+              color: BLOCK.agents,
+              rows: it.agents.slice(-3).map(agent => (
+                <Box>
                   <Text color={agent.ms === null ? TOKYO.orange : TOKYO.dim}>
                     {agent.ms === null ? '⟳ ' : '· '}
                   </Text>
                   <Text color={TOKYO.text}>{shortText(agent.subject, Math.max(4, columns - 3))}</Text>
                 </Box>
-              ))}
-            </Box>
-          )}
+              )),
+            })}
 
-          <Text color={TOKYO.line}>{rule}</Text>
-          <Box>
-            {Head({ title: 'SESSIONS', count: it.history.length })}
-            {it.history.length > SESSIONS_SHOWN && (
+          {Section({
+            id: 'sessions',
+            title: 'SESSIONS',
+            count: it.history.length,
+            color: BLOCK.sessions,
+            // ' · all ›' on the top edge, a press away from the full list.
+            extraWidth: hasMore ? 8 : 0,
+            extra: hasMore && (
               <Box>
                 <Text color={TOKYO.dim}> · </Text>
                 <Button
@@ -1113,29 +1250,37 @@ export const register: Register = on => {
                   onPress={() => update($, state, prev => ({ ...prev, sessionsPage: 0 }))}
                 />
               </Box>
-            )}
-          </Box>
-          {it.history.length === 0 && <Text color={TOKYO.dim}>no transcripts found</Text>}
-          {it.history.slice(0, SESSIONS_SHOWN).map(past => SessionRow({ past }))}
-          {it.history.length > 0 && (
-            <Text color={TOKYO.dim}>press a session to open it in a new terminal</Text>
-          )}
+            ),
+            rows: only(
+              it.history.length === 0 && <Text color={TOKYO.dim}>no transcripts found</Text>,
+              ...it.history.slice(0, SESSIONS_SHOWN).map(past => SessionRow({ past })),
+              it.history.length > 0 && (
+                <Text color={TOKYO.dim}>{shortText('press a session to open it in a new terminal', columns)}</Text>
+              ),
+            ),
+          })}
         </Box>
 
-        <Text color={TOKYO.line}>{rule}</Text>
-        <Box>
-          {QUICK_ACTIONS.map((action, index) => (
-            <Box key={`action-row-${action}`}>
-              {index > 0 && <Text color={TOKYO.dim}> · </Text>}
-              <Button
-                key={`action-${action}`}
-                plain
-                label={actionLabel(action)}
-                onPress={() => pressAction($, action)}
-              />
-            </Box>
-          ))}
-        </Box>
+        {Section({
+          id: 'actions',
+          title: 'ACTIONS',
+          color: BLOCK.actions,
+          rows: [
+            <Box>
+              {QUICK_ACTIONS.map((action, index) => (
+                <Box key={`action-row-${action}`}>
+                  {index > 0 && <Text color={TOKYO.dim}> · </Text>}
+                  <Button
+                    key={`action-${action}`}
+                    plain
+                    label={actionLabel(action)}
+                    onPress={() => pressAction($, action)}
+                  />
+                </Box>
+              ))}
+            </Box>,
+          ],
+        })}
       </Box>
     )
   })
