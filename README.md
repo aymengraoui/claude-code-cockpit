@@ -120,7 +120,7 @@ process it ever starts is `git`:
 | what fills the context | `$.session.usage({ breakdown: 'summary' })`, the categories `/context` counts |
 | running agents | `tool.call` on the `Agent` tool, timed around `next(e)` |
 | Claude Code's sessions | the transcripts in every project's transcript directory, found beside the `transcript_path` the classic hook inputs carry |
-| context rollover | `$.state` `context-rollover.status`, published by the [context-rollover](../claude-code-context-rollover) mod |
+| context rollover | `$.state` `context-rollover.status`, published by the [context-rollover](https://github.com/aymengraoui/claude-code-context-rollover) mod |
 
 The session list is Claude Code's own, not the mod's bookkeeping: what `/resume` lists. Claude
 Code writes one `<session-id>.jsonl` per session into a per-project directory, all of them side
@@ -182,7 +182,7 @@ a turn and never writes to your repo.
 ## The context rollover block
 
 **CONTEXT ROLLOVER** shows the lifecycle of the
-[context-rollover](../claude-code-context-rollover) mod, which moves long-running work into a
+[context-rollover](https://github.com/aymengraoui/claude-code-context-rollover) mod, which moves long-running work into a
 fresh session before the context grows too large. The cockpit only **observes**: that mod is
 the single source of truth and writes `$.state` `context-rollover.status`. The pane reads that
 value while drawing, so the host redraws it on every write, with no polling of its own. Nothing
