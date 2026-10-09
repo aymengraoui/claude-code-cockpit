@@ -120,7 +120,7 @@ const MASCOT_IDLE: MascotState = {
   agents: [],
 }
 
-/** The mascot's own slot, so its frames redraw the band and nothing else. */
+/** The mascot's own slot, so its frames are written apart from the pane's other state. */
 const mascot = atom({ plugin: 'cockpit', key: 'mascot' } as const, MASCOT_IDLE)
 
 /** The mascot's state with every field present, as `withDefaults` is for the pane's. */
@@ -448,7 +448,7 @@ const WORKING: ReadonlySet<MascotActivity> = new Set(['thinking', 'writing', 'ru
 let isAnimating = false
 
 /**
- * The mascot's heartbeat, which redraws the band alone. Motion is information here, not
+ * The mascot's heartbeat, which redraws its block in the pane. Motion is information here, not
  * decoration: the mascot moves while work is under way, moves for a few seconds when
  * something changes — done, failed, needs you — and then stands still, its colour and
  * its words saying the rest. Idle never moves. So the loop ends by itself, and any change
@@ -849,8 +849,17 @@ export const register: Register = on => {
     const rollover = rolloverView(rolled?.value, now, columns)
     const rolloverRows = rollover.kind === 'unavailable' ? 3 : rollover.rows.length + 2
 
+    // The mascots, under the sessions. Reading their slot subscribes the pane to their frames.
+    const m = mascotDefaults(await read($, mascot))
+    // Each sprite is nine columns and two apart; the session's own comes first, then as
+    // many subagents as fit beside it.
+    const fits = Math.max(1, Math.floor((columns + 2) / 11))
+    const agents = m.agents.slice(0, fits - 1)
+    const hidden = m.agents.length - agents.length
+    const mascotRows = (agents.length > 0 ? 5 : 4) + 2
+
     // The lists share what is left under the fixed rows; each keeps at least two.
-    const listRoom = Math.max(3, Math.floor((rows - 25 - rolloverRows) / 2))
+    const listRoom = Math.max(3, Math.floor((rows - 25 - rolloverRows - mascotRows) / 2))
     const repoName = shortText(it.repo?.root.split('/').at(-1) ?? '', Math.max(6, Math.floor(columns / 2)))
     const isArmed = (action: string): boolean =>
       it.armed !== null && it.armed.action === action && now - it.armed.at <= ARM_MS
@@ -1124,6 +1133,14 @@ export const register: Register = on => {
           ]
 
     const hasMore = it.history.length > SESSIONS_SHOWN
+    const mascotColour =
+      m.activity === 'alert'
+        ? TOKYO.red
+        : m.activity === 'waiting'
+          ? TOKYO.yellow
+          : m.activity === 'done'
+            ? TOKYO.green
+            : TOKYO.accent
 
     return (
       <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
@@ -1259,6 +1276,40 @@ export const register: Register = on => {
               ),
             ),
           })}
+
+          {Section({
+            id: 'mascots',
+            title: 'MASCOTS',
+            count: m.agents.length > 0 ? `${m.agents.length} ${m.agents.length === 1 ? 'agent' : 'agents'}` : undefined,
+            color: mascotColour,
+            rows: only(
+              ...[0, 1, 2].map(row => (
+                <Box>
+                  <Text color={mascotColour}>{spriteFor(m.activity, m.frame)[row]}</Text>
+                  {agents.map((agent, index) => (
+                    <Text key={`agent-${agent.id}-${row}`} color={AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue}>
+                      {`  ${spriteFor('running', m.frame + index)[row]}`}
+                    </Text>
+                  ))}
+                </Box>
+              )),
+              // Each subagent's task under its own sprite; the session's slot left blank.
+              agents.length > 0 && (
+                <Box>
+                  <Text>{' '.repeat(9)}</Text>
+                  {agents.map((agent, index) => (
+                    <Text key={`agent-label-${agent.id}`} color={AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue}>
+                      {`  ${shortText(agent.label, 9).padEnd(9)}`}
+                    </Text>
+                  ))}
+                  {hidden > 0 && <Text color={TOKYO.dim}> +{hidden}</Text>}
+                </Box>
+              ),
+              <Text color={mascotColour} bold>
+                {shortText(describe(m.activity, m.detail), columns)}
+              </Text>,
+            ),
+          })}
         </Box>
 
         {Section({
@@ -1281,73 +1332,6 @@ export const register: Register = on => {
             </Box>,
           ],
         })}
-      </Box>
-    )
-  })
-
-  // The band above the prompt: a small mascot with what it is doing written under it, and
-  // one more for each subagent at work. Everything sits on the band's bottom edge, against
-  // the input. It yields to the engine's surveys, which draw there.
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
-
-    const { Box, Text } = $.ui.resolve(e)
-    const m = mascotDefaults(await read($, mascot))
-    const it = withDefaults(await read($, state))
-    const running = m.agents
-    const agents = running.slice(0, 4)
-    const extra = running.length - agents.length
-
-    const colour =
-      m.activity === 'alert'
-        ? TOKYO.red
-        : m.activity === 'waiting'
-          ? TOKYO.yellow
-          : m.activity === 'done'
-            ? TOKYO.green
-            : TOKYO.accent
-    const line = describe(m.activity, m.detail)
-
-    // Too little room for the sprite: the words alone, still coloured.
-    if (e.props.maxRows < 3) {
-      return (
-        <Box>
-          <Text color={colour} bold>
-            {line}
-          </Text>
-        </Box>
-      )
-    }
-
-    // The full width of the band, everything pushed to its right edge: subagents first,
-    // the session's own mascot last, so it is the one at the edge.
-    return (
-      <Box width={e.props.bodyColumns} justifyContent="flex-end" alignItems="flex-end">
-        {extra > 0 && <Text color={TOKYO.dim}>+{extra} </Text>}
-        {agents.map((agent, index) => {
-          const tint = AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue
-
-          return (
-            <Box key={`agent-mascot-${agent.id}`} flexDirection="column" alignItems="flex-end" marginRight={3}>
-              {spriteFor('running', m.frame + index).map((row, rowIndex) => (
-                <Box key={`agent-${agent.id}-${rowIndex}`}>
-                  <Text color={tint}>{row}</Text>
-                </Box>
-              ))}
-              <Text color={tint}>{shortText(agent.label, 9)}</Text>
-            </Box>
-          )
-        })}
-        <Box flexDirection="column" alignItems="flex-end" marginLeft={agents.length > 0 ? 3 : 0}>
-          {spriteFor(m.activity, m.frame).map((row, index) => (
-            <Box key={`me-${index}`}>
-              <Text color={colour}>{row}</Text>
-            </Box>
-          ))}
-          <Text color={colour} bold>
-            {shortText(line, Math.max(12, e.props.bodyColumns - 2 - agents.length * 12))}
-          </Text>
-        </Box>
       </Box>
     )
   })

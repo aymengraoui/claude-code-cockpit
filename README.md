@@ -47,14 +47,19 @@ pane follows whatever theme you run, custom ones included.
 
 ## The mascot
 
-Right above the input, at the right-hand edge, Claude's own mascot acts out what the
+In the pane's MASCOTS block, under the sessions, Claude's own mascot acts out what the
 session is doing, with what it is doing written underneath. Each subagent at work gets one
-of its own to its left, in its own colour, labelled with its task:
+of its own to its right, in its own colour, labelled with its task (as many as the pane's
+width fits; the rest are counted):
 
 ```
-                               ▘▐▛█▜▌▖   ▗▐▛█▜▌▝          ▗▐▛█▜▌▖
-                               ▗▜███▛▘   ▝▜███▛▖          ▝▜███▛▘
-                             find cal…  write t…   running npm test
+╭─ MASCOTS 2 agents ──────────────╮
+│ ▗▐▛█▜▌▖  ▘▐▛█▜▌▖  ▗▐▛█▜▌▝        │
+│ ▝▜███▛▘  ▗▜███▛▘  ▝▜███▛▖        │
+│                                 │
+│          find cal…  write t…     │
+│ running npm test                │
+╰─────────────────────────────────╯
 ```
 
 It is built for attention that drifts. **Motion means something is happening**: the arms go while work

@@ -1035,16 +1035,10 @@ test('a turn length reads the way people say it', () => {
   expect(spoken(3840000)).toBe('1h 04m')
 })
 
-const BAND_PROPS = {
-  hasSurvey: false,
-  isWorking: false,
-  maxRows: 6,
-  bodyColumns: 100,
-  scroll: { offset: 0, bodyRows: 6 },
-  view: {},
-}
+/** A pane wide enough for the mascots' words and a few subagents beside them. */
+const WIDE_PANE_PROPS = { ...PANE_PROPS, bodyColumns: 80 }
 
-/** A session with a clock the test moves, and the band mounted over it. */
+/** A session with a clock the test moves, and the pane, which holds the mascots, mounted over it. */
 const startBand = async (
   $: Parameters<Parameters<typeof test>[1]>[0],
   on: Parameters<Parameters<typeof test>[1]>[1],
@@ -1078,8 +1072,9 @@ const startBand = async (
   const band = await $.ui.mount({
     plugin: 'cockpit',
     surface: 'terminal',
-    component: 'AbovePrompt',
-    props: BAND_PROPS,
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: WIDE_PANE_PROPS,
   })
 
   return { band, sounds, toasts }
@@ -1152,8 +1147,9 @@ test('a background subagent keeps its mascot for as long as the engine says it r
   const band = await $.ui.mount({
     plugin: 'cockpit',
     surface: 'terminal',
-    component: 'AbovePrompt',
-    props: BAND_PROPS,
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: WIDE_PANE_PROPS,
   })
 
   await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'general-purpose' })
@@ -1199,19 +1195,13 @@ test('a call is described by what it is: a file by its name, a command by itself
   expect(aboutCall('Bash', 'npm run build -- --out ./dist/app')).toBe('npm run build -- --out ./dist/app')
 })
 
-test('the mascot lives at the right, on the bottom edge, its words under it', async ($, on) => {
+test('the mascots live in the pane, under the sessions, their words under them', async ($, on) => {
   const { band } = await startBand($, on, { now: 1_000_000 })
-  const root = (await band.drawn()) as { props?: { alignItems?: string } }
+  const drawn = JSON.stringify(await band.drawn())
 
-  expect(root.props?.alignItems).toBe('flex-end')
-  // It lives on the right: the band is full width and its content pushed to the end.
-  expect((root.props as { justifyContent?: string }).justifyContent).toBe('flex-end')
-  expect((root.props as { width?: number }).width).toBe(BAND_PROPS.bodyColumns)
-  const main = childrenOf(root).at(-1)
-  const rows = childrenOf(main)
-  // Three sprite rows, then the words.
-  expect(rows.length).toBe(4)
-  expect(JSON.stringify(rows[3])).toContain('ready')
+  expect(await band.find({ text: 'MASCOTS' })).toBeDefined()
+  expect(drawn.indexOf('block-mascots')).toBeGreaterThan(drawn.indexOf('block-sessions'))
+  expect(await band.find({ text: 'ready' })).toBeDefined()
 })
 
 test('a question put to you is marked; code, headings and plain lines are not', () => {
