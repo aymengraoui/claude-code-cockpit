@@ -35,6 +35,9 @@ It runs by itself. `/rollover` gives you control:
 | `/rollover cancel` | Stand a pending rollover down and lift the gate (not once the restart has begun) |
 | `/rollover config` | The effective configuration |
 
+Claude can trigger it too: the mod gives the model a `rollover_now` tool (`mcp__context-rollover__rollover_now`). A call
+mid-turn rolls the session over when that turn ends, whatever the context; between turns it rolls over at once.
+
 ## Configuration
 
 Defaults below. Every value is a `userConfig` field: set it in `/config`, or in `settings.json` under `pluginConfigs["context-rollover"].options`. A project can override any of them in **`.claude/context-rollover.json`**, which takes precedence over both. Bad values are skipped with a warning shown in `/rollover status` and the Cockpit; thresholds that are not strictly rising fall back to the defaults together.

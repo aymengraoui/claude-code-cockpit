@@ -24,6 +24,7 @@ import { tasksFromTaskList } from './lib/transcript'
 import type { MessageSeen } from './lib/transcript'
 
 const PROJECT_CONFIG = '.claude/context-rollover.json'
+const ROLLOVER_TOOL = 'mcp__context-rollover__rollover_now'
 
 const status = atom({ plugin: 'context-rollover', key: 'status' } as const, initialStatus({ soft: 180000, prepare: 190000, hard: 200000 }, 0))
 
@@ -197,6 +198,13 @@ export const register: Register = (on, options) => {
       description: 'Context rollover: status, now, resume [id], cancel, config',
       argumentHint: '[status|now|resume [id]|cancel|config]',
     })
+    await $.tool.register({
+      name: 'rollover_now',
+      description:
+        'Roll this session over to a fresh one when the current turn ends: the project state is saved as a continuation and the next session resumes from it. Call it when the context is large and the current step is done, so work goes on without waiting for the automatic limit. Give the reason in a few words.',
+      inputSchema: { type: 'object', properties: { reason: { type: 'string', description: 'Why now, in a few words.' } } },
+      isDeferred: false,
+    })
     const loaded = await readConfig($, options)
     config = loaded.config
     rollover = new Rollover(portOf($, () => config), config, loaded.warnings)
@@ -256,6 +264,16 @@ export const register: Register = (on, options) => {
 
     return result
   }).catch(($, e, next) => next(e))
+
+  // The model's own trigger: the rollover waits for the turn end, the one safe point for /clear.
+  on('tool.call', { tool: ROLLOVER_TOOL }, async ($, e) => {
+    const current = rollover
+    if (current === null) return { result: 'context-rollover is not running yet.' as never }
+    const input = (e as { input?: { reason?: unknown } }).input
+    const reason = typeof input?.reason === 'string' && input.reason.trim() !== '' ? input.reason.trim() : 'asked for by the model'
+
+    return { result: (await current.requestAtTurnEnd(`requested by the model: ${reason}`)) as never }
+  })
 
   on('classic.SessionStart', async ($, e, next) => {
     if (e.source === 'clear' && typeof e.session_id === 'string') await rollover?.onCleared(e.session_id).catch(() => undefined)

@@ -105,6 +105,8 @@ export class Rollover {
   private isTurnRunning = false
   private notified = new Set<string>()
   private draft: Promise<void> | null = null
+  /** Why a rollover was asked for mid-turn (the model's tool); it runs at the turn end. */
+  private requested: string | null = null
   /** Continuations handed to a fresh session, by rollover id, so `contextFor` need not read the disk. */
   private handed = new Map<string, string>()
   /** Tasks the TaskCreate/TaskUpdate calls of this session have built, by id. */
@@ -383,6 +385,8 @@ export class Rollover {
   async onTurnEnd(): Promise<void> {
     this.isTurnRunning = false
     this.turnId = null
+    const requested = this.requested
+    this.requested = null
     const s = await this.status()
     if (s.phase === 'resuming') {
       const now = await this.port.now()
@@ -408,10 +412,25 @@ export class Rollover {
       }))
       if (s.sessionId !== null && s.continuation.rolloverId !== null) await this.journal(s.sessionId, 'resumed', s.continuation.rolloverId, s.generation, null)
       this.log('info', `rollover ${s.continuation.rolloverId ?? ''} complete: the fresh session finished its first turn`, true)
+      if (requested !== null) void this.rollover(requested)
       return
     }
     // Not awaited: the rollover runs /clear, which cannot run inside the hook a turn waits on.
-    if (s.phase === 'ready' || s.phase === 'draining') void this.rollover(s.phase === 'draining' ? 'hard limit' : 'prepare limit')
+    if (requested !== null) void this.rollover(requested)
+    else if (s.phase === 'ready' || s.phase === 'draining') void this.rollover(s.phase === 'draining' ? 'hard limit' : 'prepare limit')
+  }
+
+  /** Roll over when this turn ends (at once between turns); returns what the caller reads. */
+  async requestAtTurnEnd(reason: string): Promise<string> {
+    if (this.isRolling) return 'A rollover is already under way.'
+    if (!this.isTurnRunning) {
+      void this.rollover(reason)
+      return 'Rolling over now.'
+    }
+    this.requested = reason
+    await this.patch({ operation: 'Requested: rollover when this turn ends' })
+
+    return 'The session rolls over to a fresh one when this turn ends. Keep the task list current and end the turn; the continuation is written then.'
   }
 
   /** Resolves once no rollover or draft is in flight (for tests and for an orderly exit). */

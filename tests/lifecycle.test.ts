@@ -67,6 +67,25 @@ test('soft, then prepare, then the turn end: each threshold acts once, in order'
   expect(phaseOf(w)).toBe('resuming')
 })
 
+test('a rollover the model asks for mid-turn waits for the turn end, below every limit', async () => {
+  const w = new World()
+  w.messages = conversation()
+  const r = w.rollover()
+  await r.start()
+
+  await r.onTurnStart('t1')
+  await r.observe(60000, null, 'turn.step')
+  expect(await r.requestAtTurnEnd('step done')).toContain('when this turn ends')
+  await r.observe(61000, null, 'turn.step')
+  expect(w.clears).toBe(0)
+  expect(await r.gate('Bash', true)).toBeNull()
+
+  await r.onTurnEnd()
+  await r.settled()
+  expect(w.clears).toBe(1)
+  expect(phaseOf(w)).toBe('resuming')
+})
+
 test('configured thresholds are the ones used', async () => {
   const w = new World()
   const r = w.rollover({ softLimit: 50000, prepareLimit: 60000, hardLimit: 70000 })

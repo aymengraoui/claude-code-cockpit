@@ -23,6 +23,7 @@ const world = (on: On, files: Map<string, string>, tokens: number | null = 20000
     return next(e)
   })
   on('command.register', () => ({ value: { command: 'rollover' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__context-rollover__rollover_now' } }))
   on('session.cwd', () => ({ value: 'C:/work/game' }))
   on('session.id', () => ({ value: 'sessA000-0000' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000, ...(tokens === null ? {} : { tokens, percent: tokens / 10000 }) }, rateLimits: [] } }))
