@@ -13,7 +13,8 @@ import { seal, snapshotName } from '../hooks/lib/store'
 
 const ROOT = 'C:/Users/me/.claude/context-rollover/C--work-game'
 
-const posix = (path: string): string => path.split(String.fromCharCode(92)).join('/')
+// On Linux `C:/...` is not absolute, so the engine resolves it under its own cwd first: keep from the drive on.
+const posix = (path: string): string => path.split(String.fromCharCode(92)).join('/').replace(/^.*?(?=[A-Za-z]:\/)/, '')
 
 /** The engine's effects a session start reaches, answered in memory; returns the latest published status. */
 const world = (on: On, files: Map<string, string>, tokens: number | null = 20000): (() => RolloverStatus) => {
@@ -40,7 +41,7 @@ const world = (on: On, files: Map<string, string>, tokens: number | null = 20000
     return { value: undefined }
   })
   on('fs.list', (_$, e) => ({
-    value: [...files.keys()].filter(one => one.startsWith(`${posix(e.path)}/`)).map(one => ({ name: one.slice(e.path.length + 1), kind: 'file', size: 1, mtimeMs: 0, isLink: false })),
+    value: [...files.keys()].filter(one => one.startsWith(`${posix(e.path)}/`)).map(one => ({ name: one.slice(posix(e.path).length + 1), kind: 'file', size: 1, mtimeMs: 0, isLink: false })),
   }))
   on('fs.exists', (_$, e) => ({ value: files.has(posix(e.path)) }))
 
