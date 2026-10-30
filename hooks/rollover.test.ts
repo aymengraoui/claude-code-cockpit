@@ -170,7 +170,7 @@ for (const [name, value, expected] of CASES) {
       expect(found.text).toMatch(text)
     }
     // The rest of the pane is still there.
-    expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
+    expect(await ui.find({ text: 'NOTES' })).toBeDefined()
   })
 }
 

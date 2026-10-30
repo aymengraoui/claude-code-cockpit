@@ -16,6 +16,19 @@ export const bar = (percent: number, width = 5): string => {
   return FILLED.repeat(filled) + EMPTY.repeat(width - filled)
 }
 
+/** The purples the shimmer cycles through: dark to bright and back, as ultrathink's band. */
+export const SHIMMER = ['#5b2a86', '#7c3aed', '#8b5cf6', '#bb9af7', '#e9d5ff', '#bb9af7', '#8b5cf6', '#7c3aed']
+
+/**
+ * A 0-100 bar whose filled cells each take a purple, the band moving one cell per
+ * frame so a bright crest sweeps across it. Empty cells carry no colour of their own.
+ */
+export const shimmer = (percent: number, width: number, frame: number): { char: string; color: string | null }[] =>
+  Array.from(bar(percent, width), (char, index) => ({
+    char,
+    color: char === FILLED ? (SHIMMER[(((index - frame) % SHIMMER.length) + SHIMMER.length) % SHIMMER.length] ?? null) : null,
+  }))
+
 /** The palette key a 0-100 figure should be drawn in: calm until it is worth noticing. */
 export const heat = (percent: number): string => {
   if (percent >= 90) return 'error'
@@ -36,17 +49,6 @@ export const until = (iso: string | null, now = Date.now()): string | null => {
   if (minutes >= 60) return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
 
   return `${minutes}m`
-}
-
-/**
- * A path cut to `width` from the left, so the filename always survives:
- * `src/engine/parse.ts` at 14 becomes `…ngine/parse.ts`.
- */
-export const shortPath = (path: string, width: number): string => {
-  const clean = toPosix(path)
-  if (clean.length <= width || width < 2) return clean
-
-  return `…${clean.slice(clean.length - (width - 1))}`
 }
 
 /** A command cut to `width` from the right, where the verb is. */
@@ -93,14 +95,6 @@ export const spoken = (ms: number): string => {
   if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
 
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
-}
-
-/** A prompt reduced to one short line, to title a session in the history list. */
-export const titleOf = (text: string, max = 64): string => {
-  const line = text.replace(/\s+/g, ' ').trim()
-  if (line === '') return 'untitled'
-
-  return line.length <= max ? line : `${line.slice(0, max - 1)}…`
 }
 
 const MODEL_LABELS: Readonly<Record<string, string>> = {

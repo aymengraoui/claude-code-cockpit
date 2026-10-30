@@ -1,47 +1,13 @@
 import { expect, test } from 'claude-code/testing'
 
-import {
-  ago,
-  dirOf,
-  grepArgv,
-  idOf,
-  metaFromTranscript,
-  pickRecent,
-  resumeCommand,
-  titleFromTranscript,
-  toPast,
-} from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
 import { effortLabel, withDefaults } from './register'
 import { heatOf, TOKYO } from './lib/palette'
-import { aboutCall, activityOfTool, describe as describeActivity, spriteFor } from './lib/mascot'
-import type { MascotActivity } from './lib/mascot'
+import { aboutCall, activityOfTool } from './lib/mascot'
 import { emphasizeQuestions, errorLines } from './lib/attention'
 import { subjectOf, todosOf } from './lib/tools'
-import {
-  bar,
-  kilo,
-  footerMode,
-  modelLabel,
-  spoken,
-  shortPath,
-  shortText,
-  titleOf,
-  until,
-} from './lib/format'
-import { capDiff, parseNumstat, parseStatus, relativeTo, withCounts } from './lib/git'
-
-const STATUS = [
-  '# branch.oid 0bd1c4f',
-  '# branch.head feat/parser',
-  '# branch.ab +2 -1',
-  '1 .M N... 100644 100644 100644 0bd1 0bd1 src/parse.ts',
-  '1 M. N... 100644 100644 100644 0bd1 0bd1 src/tokens.ts',
-  '? notes.md',
-  '',
-].join('\n')
-
-const NUMSTAT = ['48\t12\tsrc/parse.ts', '90\t0\tsrc/tokens.ts', '-\t-\tlogo.png', ''].join('\n')
+import { bar, kilo, footerMode, modelLabel, shimmer, SHIMMER, spoken, shortText, until } from './lib/format'
+import { cacheView } from './lib/usage'
 
 const MODEL_ROW = [
   {
@@ -102,10 +68,7 @@ test('a reset reads in the largest unit that still says something', () => {
   expect(until('not a date', now)).toBe(null)
 })
 
-test('a long path keeps its filename, a long command keeps its verb', () => {
-  expect(shortPath('src/engine/parse.ts', 40)).toBe('src/engine/parse.ts')
-  expect(shortPath('src/engine/parse.ts', 14)).toBe('…gine/parse.ts')
-  expect(shortPath(`src${String.fromCharCode(92)}a.ts`, 40)).toBe('src/a.ts')
+test('a long command keeps its verb', () => {
   expect(shortText('npm run build --silent', 12)).toBe('npm run bui…')
 })
 
@@ -114,50 +77,6 @@ test('a known model id reads as its name, an unknown one is still legible', () =
   expect(modelLabel('claude-sonnet-5-5')).toBe('Sonnet 5.5')
   expect(modelLabel('claude-haiku-4-5-20251001')).toBe('Haiku 4.5')
   expect(modelLabel('claude-newmodel-9-2')).toBe('Newmodel 9.2')
-})
-
-test('git status gives the branch, its divergence and every changed path', () => {
-  const repo = parseStatus(STATUS)
-
-  expect(repo.branch).toBe('feat/parser')
-  expect(repo.ahead).toBe(2)
-  expect(repo.behind).toBe(1)
-  expect(repo.changes.map(one => one.path)).toEqual([
-    'src/parse.ts',
-    'src/tokens.ts',
-    'notes.md',
-  ])
-  expect(repo.changes[2]?.status).toBe('?')
-})
-
-test('a detached head and unparsable output both degrade instead of throwing', () => {
-  expect(parseStatus('# branch.head (detached)').branch).toBe(null)
-  expect(parseStatus('').branch).toBe(null)
-  expect(parseStatus('garbage').changes).toEqual([])
-})
-
-test('numstat counts attach to paths, a binary file counting as zero', () => {
-  const counts = parseNumstat(NUMSTAT)
-
-  expect(counts.get('src/parse.ts')).toEqual({ added: 48, removed: 12 })
-  expect(counts.get('logo.png')).toEqual({ added: 0, removed: 0 })
-})
-
-test("this session's files sort above the rest, then the largest diffs", () => {
-  const repo = withCounts(
-    parseStatus(STATUS),
-    parseNumstat(NUMSTAT),
-    new Set(['src/parse.ts']),
-  )
-
-  expect(repo.changes.map(one => one.path)).toEqual([
-    'src/parse.ts',
-    'src/tokens.ts',
-    'notes.md',
-  ])
-  expect(repo.changes[0]?.isMine).toBe(true)
-  expect(repo.changes[1]?.isMine).toBe(false)
-  expect(repo.changes[1]?.added).toBe(90)
 })
 
 test('the pane draws the usage meters it has figures for', async ($, on) => {
@@ -183,51 +102,6 @@ test('the pane draws the usage meters it has figures for', async ($, on) => {
   expect((await ui.find({ text: '37%' }))?.text).toContain('37%')
   expect((await ui.find({ text: '12%' }))?.text).toContain('12%')
   expect((await ui.find({ text: '81%' }))?.text).toContain('81%')
-})
-
-test('the pane draws the branch and the working tree it read from git', async ($, on) => {
-  on('command.register', () => ({ value: undefined }))
-  on('clock.sleep', () => ({ value: undefined }))
-  on('config.list', () => ({ value: MODEL_ROW }))
-  on('ui.panes', () => ({ value: [] }))
-  on('ui.open', () => ({ value: { id: 'cockpit' } }))
-  on('store.get', () => ({ value: [] }))
-  on('session.cwd', () => ({ value: '/repo' }))
-  on('session.id', () => ({ value: 'current' }))
-  on('session.turns', () => ({ value: 3 }))
-  on('session.model', () => ({ value: 'claude-opus-5' }))
-  on('session.usage', () => ({ value: USAGE }))
-  on('process.run', (_$, e) => ({
-    value: {
-      exitCode: 0,
-      stdout: e.argv.includes('rev-parse') ? '/repo' : e.argv.includes('status') ? STATUS : NUMSTAT,
-      stderr: '',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-    },
-  }))
-  on('clock.now', () => ({ value: Date.now() }))
-  on('session.start', () => ({ sessionId: 'test', cwd: '/repo' }))
-
-  await $.session.start({ source: 'startup', cwd: '/repo' })
-
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: PANE_PROPS,
-  })
-
-  expect(await ui.find({ text: 'feat/parser' })).toBeDefined()
-  expect(await ui.find({ text: 'WORKING TREE' })).toBeDefined()
-  expect(await ui.find({ text: '+48' })).toBeDefined()
-})
-
-test('a prompt becomes a one-line title', () => {
-  expect(titleOf('  fix   the\nparser  ')).toBe('fix the parser')
-  expect(titleOf('', 10)).toBe('untitled')
-  expect(titleOf('a'.repeat(80), 10)).toBe(`${'a'.repeat(9)}…`)
 })
 
 test('token counts read at a glance', () => {
@@ -294,208 +168,6 @@ test('the pane is primed at launch, and says so where a section is empty', async
   expect(await ui.find({ text: 'Opus 5' })).toBeDefined()
   expect(await ui.find({ text: '12%' })).toBeDefined()
   expect(await ui.find({ text: '24k/200k' })).toBeDefined()
-  expect(await ui.find({ text: 'not a git repository' })).toBeDefined()
-  expect(await ui.find({ text: 'no transcripts found' })).toBeDefined()
-})
-
-const TRANSCRIPT = [
-  JSON.stringify({ type: 'mode', sessionId: 'older' }),
-  JSON.stringify({ type: 'permission-mode', permissionMode: 'default', sessionId: 'older' }),
-  JSON.stringify({ type: 'user', isMeta: true, message: { content: 'ignore me' } }),
-  JSON.stringify({ type: 'user', message: { content: '<command-name>/cockpit</command-name>' } }),
-  JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'fix the parser' }] } }),
-  JSON.stringify({ type: 'assistant', message: { content: 'on it' } }),
-  '',
-].join(String.fromCharCode(10))
-
-test('a transcript is titled by the first prompt the person actually typed', () => {
-  expect(titleFromTranscript(TRANSCRIPT)).toBe('fix the parser')
-  expect(titleFromTranscript('{"type":"user","message":{"content":"hi"}}')).toBe('hi')
-  expect(titleFromTranscript('not json at all')).toBe(null)
-  expect(titleFromTranscript('')).toBe(null)
-})
-
-test('the transcript directory and session id come off the path the engine gives', () => {
-  const sep = String.fromCharCode(92)
-  expect(dirOf(`C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}abc.jsonl`)).toBe(
-    'C:/Users/me/.claude/projects/p',
-  )
-  expect(dirOf('/home/me/.claude/projects/p/abc.jsonl')).toBe('/home/me/.claude/projects/p')
-  expect(idOf('abc-123.jsonl')).toBe('abc-123')
-})
-
-test('only transcripts are listed, newest first, empty ones left out', () => {
-  const entries = [
-    { name: 'old.jsonl', kind: 'file' as const, size: 10, mtimeMs: 1000 },
-    { name: 'new.jsonl', kind: 'file' as const, size: 10, mtimeMs: 3000 },
-    { name: 'empty.jsonl', kind: 'file' as const, size: 0, mtimeMs: 4000 },
-    { name: 'notes.md', kind: 'file' as const, size: 10, mtimeMs: 5000 },
-    { name: 'sub', kind: 'dir' as const, size: 0, mtimeMs: 6000 },
-  ]
-
-  expect(pickRecent(entries, 8).map(one => one.name)).toEqual(['new.jsonl', 'old.jsonl'])
-  expect(pickRecent(entries, 1).map(one => one.name)).toEqual(['new.jsonl'])
-})
-
-test('a transcript with no prompt is listed by its id instead', () => {
-  const found = { name: 'abcdef1234.jsonl', kind: 'file' as const, size: 10, mtimeMs: 2000, dir: '/p/-home-me-app' }
-
-  expect(toPast(found, { title: null, prompt: 'fix the parser', cwd: '/home/me/app' })).toEqual({
-    id: 'abcdef1234',
-    at: 2000,
-    title: 'fix the parser',
-    cwd: '/home/me/app',
-    project: 'app',
-  })
-  expect(toPast(found, null).title).toBe('abcdef12')
-  expect(toPast(found, null).project).toBe('-home-me-app')
-})
-
-test('a session is titled as /resume titles it: its name, then its AI title, then its first prompt', () => {
-  const sep = String.fromCharCode(92)
-  const rows = (...extra: object[]) =>
-    [
-      JSON.stringify({ type: 'user', cwd: `C:${sep}Users${sep}me${sep}app`, message: { content: 'fix the parser' } }),
-      ...extra.map(one => JSON.stringify(one)),
-    ].join(String.fromCharCode(10))
-
-  expect(metaFromTranscript(rows())).toEqual({ title: null, prompt: 'fix the parser', cwd: 'C:/Users/me/app' })
-  expect(metaFromTranscript(rows({ type: 'ai-title', aiTitle: 'Parser rounding' })).title).toBe('Parser rounding')
-  expect(
-    metaFromTranscript(
-      rows(
-        { type: 'custom-title', customTitle: 'old name' },
-        { type: 'ai-title', aiTitle: 'Parser rounding' },
-        { type: 'custom-title', customTitle: 'parser work' },
-      ),
-    ).title,
-  ).toBe('parser work')
-  expect(metaFromTranscript(TRANSCRIPT).prompt).toBe('fix the parser')
-})
-
-test('a transcript too large to read is grepped from its own folder', () => {
-  const runs = grepArgv('big.jsonl')
-
-  expect(runs.length).toBe(2)
-  for (const argv of runs) {
-    expect(argv.slice(0, 3)).toEqual(['git', 'grep', '--no-index'])
-    expect(argv.at(-1)).toBe('big.jsonl')
-  }
-})
-
-test('how long ago reads short', () => {
-  const now = 100 * 86400000
-
-  expect(ago(now - 10000, now)).toBe('now')
-  expect(ago(now - 12 * 60000, now)).toBe('12m')
-  expect(ago(now - 3 * 3600000, now)).toBe('3h')
-  expect(ago(now - 4 * 86400000, now)).toBe('4d')
-  expect(ago(now - 21 * 86400000, now)).toBe('3w')
-})
-
-test("the pane lists Claude Code's sessions from every project, and all of them a press away", async ($, on) => {
-  const sep = String.fromCharCode(92)
-  const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
-  const now = Date.now()
-  const others = Array.from({ length: 7 }, (_, index) => ({
-    name: `other-${index}.jsonl`,
-    kind: 'file',
-    size: 200,
-    mtimeMs: now - (index + 2) * 3600000,
-  }))
-
-  on('store.get', () => ({ value: {} }))
-  on('store.set', () => ({ value: undefined }))
-  const posix = (at: string) => at.split(sep).join('/')
-
-  on('fs.list', (_$, e) => ({
-    value: posix(e.path).endsWith('/projects')
-      ? [
-          { name: 'p', kind: 'dir', size: 0, mtimeMs: 0 },
-          { name: 'q', kind: 'dir', size: 0, mtimeMs: 0 },
-        ]
-      : posix(e.path).endsWith('/p')
-        ? [
-            { name: 'current.jsonl', kind: 'file', size: 200, mtimeMs: now },
-            { name: 'empty.jsonl', kind: 'file', size: 200, mtimeMs: now - 60000 },
-          ]
-        : others,
-  }))
-  on('fs.read', (_$, e) => ({
-    value: e.path.endsWith('empty.jsonl')
-      ? JSON.stringify({ type: 'mode' })
-      : posix(e.path).includes('/q/')
-        ? JSON.stringify({ type: 'user', cwd: '/home/me/elsewhere', message: { content: 'tune the cache' } })
-        : TRANSCRIPT,
-  }))
-  on('classic.SessionStart', () => ({}))
-
-  await $.classic.SessionStart({ source: 'startup', transcript_path: path })
-
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    // Wide enough that a block's border and padding leave every title whole.
-    props: { ...PANE_PROPS, bodyColumns: 40 },
-  })
-
-  expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
-  expect(await ui.find({ text: 'fix the parser' })).toBeDefined()
-  expect(await ui.find({ text: 'tune the cache' })).toBeDefined()
-  expect(await ui.find({ text: 'elsewhere' })).toBeDefined()
-  // A session with nothing typed in it has nothing to resume.
-  expect(await ui.find({ text: 'empty' })).toBeUndefined()
-
-  await ui.press({ key: 'sessions-all' })
-  expect(await ui.find({ text: 'ALL SESSIONS' })).toBeDefined()
-  await ui.press({ key: 'sessions-close' })
-  expect(await ui.find({ text: 'ALL SESSIONS' })).toBeUndefined()
-})
-
-test('a session names the command that returns to it', () => {
-  expect(resumeCommand('abc-123')).toBe('claude --resume abc-123')
-})
-
-test('a press with no terminal to be had still leaves the command on the clipboard', async ($, on) => {
-  const sep = String.fromCharCode(92)
-  const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
-  let copied: string | undefined
-  let toasted: string | undefined
-
-  on('store.get', () => ({ value: {} }))
-  on('store.set', () => ({ value: undefined }))
-  on('fs.list', () => ({
-    value: [{ name: 'older.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() - 7200000 }],
-  }))
-  on('fs.read', () => ({ value: TRANSCRIPT }))
-  on('classic.SessionStart', () => ({}))
-  on('ui.copy', (_$, e) => {
-    copied = e.text
-
-    return { value: { isCopied: true } }
-  })
-  on('ui.toast', (_$, e) => {
-    toasted = e.text
-
-    return { value: undefined }
-  })
-
-  await $.classic.SessionStart({ source: 'startup', transcript_path: path })
-
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: PANE_PROPS,
-  })
-
-  await ui.press({ key: 'past-older' })
-
-  expect(copied).toBe('claude --resume older')
-  expect(toasted).toContain('claude --resume older')
 })
 
 test('a terminal is tried per platform, the window before a console', () => {
@@ -507,56 +179,6 @@ test('a terminal is tried per platform, the window before a console', () => {
   const posix = launchCommands('claude', '/repo', false)
   expect(posix[0]?.[0]).toBe('osascript')
   expect(posix.map(one => one[0])).toContain('gnome-terminal')
-})
-
-test('pressing a session opens it in a new terminal', async ($, on) => {
-  const sep = String.fromCharCode(92)
-  const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
-  let launched: readonly string[] | undefined
-  let copied = false
-
-  on('store.get', () => ({ value: {} }))
-  on('store.set', () => ({ value: undefined }))
-  on('fs.list', () => ({
-    value: [{ name: 'older.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() - 7200000 }],
-  }))
-  on('fs.read', () => ({ value: TRANSCRIPT }))
-  on('classic.SessionStart', () => ({}))
-  on('ui.toast', () => ({ value: undefined }))
-  on('ui.copy', () => {
-    copied = true
-
-    return { value: { isCopied: true } }
-  })
-  on('process.run', (_$, e) => {
-    launched = e.argv
-
-    return {
-      value: {
-        exitCode: 0,
-        stdout: '',
-        stderr: '',
-        isStdoutTruncated: false,
-        isStderrTruncated: false,
-      },
-    }
-  })
-
-  await $.classic.SessionStart({ source: 'startup', transcript_path: path })
-
-  const ui = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: PANE_PROPS,
-  })
-
-  await ui.press({ key: 'past-older' })
-
-  expect(launched?.[0]).toBe('wt.exe')
-  expect(launched).toContain('claude --resume older')
-  expect(copied).toBe(false)
 })
 
 const startPane = async ($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<Parameters<typeof test>[1]>[1]) => {
@@ -705,26 +327,6 @@ test('a later report replaces an earlier one, whichever input brings it', async 
   expect(await ui.find({ text: 'plan mode on' })).toBeUndefined()
 })
 
-test('a written path is matched to git by its place in the repository', () => {
-  const inside = relativeTo('C:/code/proj', [
-    'C:/code/proj/src/parse.ts',
-    'c:/code/proj/README.md',
-    'C:/code/other/x.ts',
-    'C:/code/project-two/y.ts',
-  ])
-
-  expect([...inside].sort()).toEqual(['README.md', 'src/parse.ts'])
-})
-
-test('a long diff is cut, and says how much was left out', () => {
-  const lines = Array.from({ length: 10 }, (_, i) => `+line ${i}`).join(String.fromCharCode(10))
-  const cut = capDiff(lines, 4).split(String.fromCharCode(10))
-
-  expect(cut.length).toBe(5)
-  expect(cut[4]).toBe('… 6 more lines')
-  expect(capDiff('short', 4)).toBe('short')
-})
-
 /** A session launched outside any repository, whose work happens in C:/code/proj. */
 const startOutsideRepo = async (
   $: Parameters<Parameters<typeof test>[1]>[0],
@@ -776,39 +378,6 @@ const startOutsideRepo = async (
 
   return { ui, ran }
 }
-
-test('launched outside a repository, the pane follows the repository the work is in', async ($, on) => {
-  const { ui } = await startOutsideRepo($, on)
-  expect(await ui.find({ text: 'not a git repository' })).toBeDefined()
-
-  await $.tool.call({
-    tool: 'Write',
-    tool_use_id: 'w1',
-    input: { file_path: 'C:/code/proj/src/parse.ts', content: 'x' },
-  })
-
-  expect(await ui.find({ text: 'proj' })).toBeDefined()
-  expect(await ui.find({ text: 'feat/parser' })).toBeDefined()
-  // Written this session, and now recognised as such: the dot never lit before.
-  expect(await ui.find({ text: '●' })).toBeDefined()
-})
-
-test('pressing a changed file opens its diff, and back returns', async ($, on) => {
-  const { ui } = await startOutsideRepo($, on)
-  await $.tool.call({
-    tool: 'Write',
-    tool_use_id: 'w1',
-    input: { file_path: 'C:/code/proj/src/parse.ts', content: 'x' },
-  })
-
-  await ui.press({ key: 'diff-src/parse.ts' })
-  expect((await ui.find({ type: 'Code' }))?.text).toContain('+new')
-  expect(await ui.find({ key: 'diff-close' })).toBeDefined()
-
-  await ui.press({ key: 'diff-close' })
-  expect(await ui.find({ type: 'Code' })).toBeUndefined()
-  expect(await ui.find({ text: 'WORKING TREE' })).toBeDefined()
-})
 
 test('the context line opens what fills it, largest first', async ($, on) => {
   const usage = {
@@ -875,7 +444,7 @@ test('quick actions run the real commands, and clear asks twice', async ($, on) 
   expect(ran).toEqual(['rewind', 'clear'])
 })
 
-/** The state as v0.15 stored it: no diff, contextRows or armed, and a repo with no root. */
+/** The state as v0.15 stored it: no contextRows, armed or notes, and fields since removed. */
 const OLD_STATE = {
   model: 'Opus 5.5',
   effort: 'high',
@@ -900,13 +469,13 @@ const OLD_STATE = {
 test('state stored by an older version is filled in, never drawn half-shaped', () => {
   const it = withDefaults(OLD_STATE as never)
 
-  expect(it.diff).toBe(null)
   expect(it.contextRows).toBe(null)
   expect(it.armed).toBe(null)
-  expect(it.repo?.root).toBe('')
+  expect(it.respondedAt).toBe(null)
+  expect(it.notes).toBe('')
   // What the old version did have is kept.
   expect(it.model).toBe('Opus 5.5')
-  expect(withDefaults(null).diff).toBe(null)
+  expect(withDefaults(null).notes).toBe('')
 })
 
 test('a pane reloaded over an older version state still draws', async ($, on) => {
@@ -938,7 +507,8 @@ test('the model and effort lead the pane; the quick actions are pinned to its bo
   // something that scrolls away with the content above it.
   expect(root.props?.height).toBe(PANE_PROPS.scroll.bodyRows)
 
-  const [content, actions] = childrenOf(root)
+  const [content, progress, actions] = childrenOf(root)
+  expect(JSON.stringify(progress)).toContain('"key":"progress"')
   expect((content as { props?: { flexGrow?: number } }).props?.flexGrow).toBe(1)
   expect(JSON.stringify(content)).toContain('"key":"model"')
   expect(JSON.stringify(content)).toContain('"key":"effort"')
@@ -953,19 +523,6 @@ test('compact warns once the context is nearly full', async ($, on) => {
   const { ui } = await startOutsideRepo($, on, { usage: full })
 
   expect((await ui.find({ key: 'action-compact' }))?.text).toBe('compact ⚠')
-})
-
-test('the diff view keeps its way back at the bottom too', async ($, on) => {
-  const { ui } = await startOutsideRepo($, on)
-  await $.tool.call({
-    tool: 'Write',
-    tool_use_id: 'w1',
-    input: { file_path: 'C:/code/proj/src/parse.ts', content: 'x' },
-  })
-  await ui.press({ key: 'diff-src/parse.ts' })
-
-  const children = childrenOf(await ui.drawn())
-  expect(JSON.stringify(children.at(-1))).toContain('"key":"diff-close"')
 })
 
 test('the content keeps a gutter from the edge that resizes the pane', async ($, on) => {
@@ -987,46 +544,20 @@ test('every block is framed, its title set into the top edge, each in its own co
   const tops = drawn.match(/"╭─ "/g) ?? []
   const bottoms = drawn.match(/"╰─*╯"/g) ?? []
   expect(tops.length).toBe(bottoms.length)
-  for (const title of ['SESSION', 'USAGE', 'CONTEXT ROLLOVER', 'WORKING TREE', 'SESSIONS', 'ACTIONS']) {
+  for (const title of ['SESSION', 'USAGE', 'CONTEXT ROLLOVER', 'NOTES', 'ACTIONS']) {
     expect(await ui.find({ text: title })).toBeDefined()
   }
+  for (const gone of ['WORKING TREE', 'SESSIONS', 'MASCOTS']) expect(await ui.find({ text: gone })).toBeUndefined()
   expect(drawn).toContain('#7aa2f7')
   expect(drawn).toContain('#9ece6a')
 })
 
-const ALL_ACTIVITIES: MascotActivity[] = [
-  'idle', 'thinking', 'writing', 'running', 'reading', 'planning', 'done', 'alert', 'waiting',
-]
-
-test('every frame of every activity is three rows of nine columns', () => {
-  for (const activity of ALL_ACTIVITIES) {
-    for (let frame = 0; frame < 24; frame += 1) {
-      const rows = spriteFor(activity, frame)
-      expect(rows.length).toBe(3)
-      for (const row of rows) expect([...row].length).toBe(9)
-    }
-  }
-})
-
-test('the mascot moves differently for each kind of moment', () => {
-  // Idle blinks now and then; a failure shakes; done throws its arms up.
-  expect(spriteFor('idle', 0)[0]).not.toBe(spriteFor('idle', 1)[0])
-  expect(spriteFor('alert', 0)).not.toEqual(spriteFor('alert', 1))
-  expect(spriteFor('done', 0)[1]).not.toBe(spriteFor('done', 1)[1])
-  expect(spriteFor('waiting', 0)[1]).not.toBe(spriteFor('waiting', 1)[1])
-})
-
-test('a tool reads as what the mascot is doing, and that reads as plain words', () => {
+test('a tool reads as what the session is doing', () => {
   expect(activityOfTool('Edit')).toBe('writing')
   expect(activityOfTool('Bash')).toBe('running')
   expect(activityOfTool('Grep')).toBe('reading')
   expect(activityOfTool('TodoWrite')).toBe('planning')
   expect(activityOfTool('SomethingElse')).toBe('thinking')
-
-  expect(describeActivity('running', 'npm test')).toBe('running npm test')
-  expect(describeActivity('done', null)).toBe('✓ done — your turn')
-  expect(describeActivity('waiting', 'approve Bash')).toBe('⏳ needs you: approve Bash')
-  expect(describeActivity('alert', 'npm test')).toBe('⚠ failed npm test')
 })
 
 test('a turn length reads the way people say it', () => {
@@ -1035,10 +566,10 @@ test('a turn length reads the way people say it', () => {
   expect(spoken(3840000)).toBe('1h 04m')
 })
 
-/** A pane wide enough for the mascots' words and a few subagents beside them. */
+/** A pane wide enough for every block. */
 const WIDE_PANE_PROPS = { ...PANE_PROPS, bodyColumns: 80 }
 
-/** A session with a clock the test moves, and the pane, which holds the mascots, mounted over it. */
+/** A session with a clock the test moves, and the pane mounted over it. */
 const startBand = async (
   $: Parameters<Parameters<typeof test>[1]>[0],
   on: Parameters<Parameters<typeof test>[1]>[1],
@@ -1080,37 +611,26 @@ const startBand = async (
   return { band, sounds, toasts }
 }
 
-test('the band says what is happening, and whose turn it is', async ($, on) => {
+test('a long turn with a failed step says so when it ends', async ($, on) => {
   const clock = { now: 1_000_000 }
-  const { band } = await startBand($, on, clock)
-  expect(await band.find({ text: 'ready' })).toBeDefined()
-
-  await $.classic.UserPromptSubmit({ prompt: 'fix it', permission_mode: 'auto' })
-  expect(await band.find({ text: 'thinking…' })).toBeDefined()
-
-  await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
-  expect(await band.find({ text: '✓ done — your turn' })).toBeDefined()
-})
-
-test('a failed step is still on show when the turn ends', async ($, on) => {
-  const { band } = await startBand($, on, { now: 1_000_000 })
+  const { toasts } = await startBand($, on, clock)
 
   await $.classic.UserPromptSubmit({ prompt: 'test it', permission_mode: 'auto' })
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', input: { command: 'npm test' } })
+  clock.now += 95_000
   await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
 
-  expect(await band.find({ text: /⚠ failed 1 step: npm test/ })).toBeDefined()
+  expect(toasts.join(' ')).toContain('1 failed')
 })
 
 test('a wait on the person is the loudest thing there is', async ($, on) => {
-  const { band, sounds } = await startBand($, on, { now: 1_000_000 })
+  const { sounds } = await startBand($, on, { now: 1_000_000 })
 
   await $.classic.Notification({
     message: 'Claude needs your permission to use Bash',
     notification_type: 'permission_prompt',
   })
 
-  expect(await band.find({ text: /⏳ needs you: Claude needs your permission/ })).toBeDefined()
   expect(sounds).toEqual(['sounds/chime.wav'])
 })
 
@@ -1128,39 +648,6 @@ test('a long turn ends with a chime and a toast; a short one stays quiet', async
   await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't2', reason: 'end_turn' } as never)
   expect(sounds).toEqual(['sounds/chime.wav'])
   expect(toasts.join(' ')).toContain('✓ Done — your turn')
-})
-
-test('a background subagent keeps its mascot for as long as the engine says it runs', async ($, on) => {
-  // What the engine reports: two at work, until they are not.
-  let agents = [
-    { id: 'a1', description: 'count LOC', type: 'general-purpose', status: 'running' },
-    { id: 'a2', description: 'list test', type: 'general-purpose', status: 'running' },
-  ]
-  on('agent.list', () => ({ value: agents }))
-  on('clock.now', () => ({ value: 1_000_000 }))
-  on('clock.sleep', () => {
-    throw new Error('no time passes in this test')
-  })
-  on('classic.SubagentStart', () => ({}))
-  on('classic.SubagentStop', () => ({}))
-
-  const band = await $.ui.mount({
-    plugin: 'cockpit',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'cockpit',
-    props: WIDE_PANE_PROPS,
-  })
-
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'general-purpose' })
-  expect(await band.find({ text: 'count LOC' })).toBeDefined()
-  expect(await band.find({ text: 'list test' })).toBeDefined()
-
-  // One finishes: its mascot goes, the other's stays.
-  agents = [{ ...agents[0]!, status: 'completed' }, agents[1]!]
-  await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'general-purpose', stop_hook_active: false })
-  expect(await band.find({ text: 'count LOC' })).toBeUndefined()
-  expect(await band.find({ text: 'list test' })).toBeDefined()
 })
 
 test('new opens a fresh claude in a terminal of its own', async ($, on) => {
@@ -1193,15 +680,6 @@ test('a call is described by what it is: a file by its name, a command by itself
   expect(aboutCall('Bash', 'cd ~/Desktop/Code/claude-code-cockpit && git show v99')).toBe('git show v99')
   expect(aboutCall('Bash', 'cd "C:/My Code/app"; npm test')).toBe('npm test')
   expect(aboutCall('Bash', 'npm run build -- --out ./dist/app')).toBe('npm run build -- --out ./dist/app')
-})
-
-test('the mascots live in the pane, under the sessions, their words under them', async ($, on) => {
-  const { band } = await startBand($, on, { now: 1_000_000 })
-  const drawn = JSON.stringify(await band.drawn())
-
-  expect(await band.find({ text: 'MASCOTS' })).toBeDefined()
-  expect(drawn.indexOf('block-mascots')).toBeGreaterThan(drawn.indexOf('block-sessions'))
-  expect(await band.find({ text: 'ready' })).toBeDefined()
 })
 
 test('a question put to you is marked; code, headings and plain lines are not', () => {
@@ -1286,3 +764,42 @@ test('a failed tool call is drawn loud, with why; one that worked keeps its own 
   expect(engineDrew).toBe(1)
 })
 
+test('the progress shimmer is purple, in proportion, and moves frame to frame', () => {
+  const at0 = shimmer(50, 10, 0)
+  const at1 = shimmer(50, 10, 1)
+
+  expect(at0.length).toBe(10)
+  expect(at0.filter(cell => cell.char === '▰').length).toBe(5)
+  // Empty cells take the frame colour; filled ones a purple of the band.
+  expect(at0.slice(5).every(cell => cell.color === null)).toBe(true)
+  expect(at0.slice(0, 5).every(cell => cell.color !== null && SHIMMER.includes(cell.color))).toBe(true)
+  // The crest sweeps one cell per frame.
+  expect(at1[1]?.color).toBe(at0[0]?.color)
+  expect(at1.map(cell => cell.color)).not.toEqual(at0.map(cell => cell.color))
+})
+
+test('the cache reads warm with the time left, then cold past its TTL', () => {
+  const hour = 3_600_000
+
+  expect(cacheView(null, 0, hour)).toBe(null)
+  expect(cacheView(0, 18 * 60_000, hour)).toEqual({ isWarm: true, left: '42m', leftMs: 42 * 60_000 })
+  expect(cacheView(0, 30_000, 5 * 60_000)?.left).toBe('4m')
+  expect(cacheView(0, 4.5 * 60_000, 5 * 60_000)?.left).toBe('<1m')
+  expect(cacheView(0, hour + 1, hour)?.isWarm).toBe(false)
+})
+
+test('notes take the room the other blocks leave, and every edit is kept per project', async ($, on) => {
+  const stored: Record<string, unknown> = {}
+  on('store.set', (_$, e) => {
+    stored[e.key] = e.value
+
+    return { value: undefined }
+  })
+  const ui = await startPane($, on)
+
+  expect(await ui.find({ key: 'notes' })).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).toMatch(/"rows":([3-9]|\d\d)/)
+
+  await ui.input({ key: 'notes', text: 'ship the cache line', kind: 'change' })
+  expect(stored['cockpit.notes./repo']).toBe('ship the cache line')
+})

@@ -1,53 +1,23 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { Activity, Cockpit, ContextRow, MascotState, OpenDiff, Past, Repo, Todo } from '../types'
-import {
-  bar,
-  kilo,
-  footerMode,
-  modelLabel,
-  spoken,
-  shortPath,
-  shortText,
-  toPosix,
-  until,
-} from './lib/format'
-import { capDiff, parseNumstat, parseStatus, relativeTo, withCounts } from './lib/git'
+import type { Activity, Cockpit, ContextRow, MascotState } from '../types'
+import { bar, kilo, footerMode, modelLabel, shimmer, spoken, shortText, toPosix, until } from './lib/format'
 import { subjectOf, todosOf } from './lib/tools'
-import {
-  ago,
-  dirOf,
-  idOf,
-  grepArgv,
-  isResumable,
-  MAX_READ_BYTES,
-  metaFromTranscript,
-  pickRecent,
-  resumeCommand,
-  toPast,
-} from './lib/sessions'
-import type { Found, Meta } from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
 import { heatOf, TOKYO } from './lib/palette'
-import { aboutCall, activityOfTool, CHIME_AFTER_MS, describe, spriteFor } from './lib/mascot'
+import { aboutCall, activityOfTool, CHIME_AFTER_MS } from './lib/mascot'
 import type { MascotActivity } from './lib/mascot'
 import { emphasizeQuestions, errorLines } from './lib/attention'
-import { fromUsage } from './lib/usage'
+import { cacheView, fromUsage } from './lib/usage'
 import { labelOf, rolloverBar, rolloverView } from './lib/rollover'
 
 const PANE = 'cockpit'
 
-/** `$.store` key holding what each transcript said, by session id, with the mtime it was read at. */
-const SESSIONS = 'cockpit.sessions'
-/** `$.store` key holding the transcript directory, so a reload knows it before any prompt. */
-const DIR = 'cockpit.transcriptDir'
-/** Sessions read and listed, across every project: `/resume`'s list, newest first. */
-const SESSIONS_LISTED = 200
-/** Sessions the overview shows; the rest are a press away. */
-const SESSIONS_SHOWN = 5
-/** `$.store` key holding the repository last worked in, for a launch outside any repo. */
-const REPO = 'cockpit.repoDir'
+/** `$.store` key prefix for each project's notes, the project's directory after it. */
+const NOTES = 'cockpit.notes.'
+/** Open plan items the pane lists; the rest wait their turn. */
+const PLAN_SHOWN = 5
 /** How long a press that wants confirming stays armed. */
 const ARM_MS = 4000
 /** Columns of space between the pane's edge — the line that resizes it — and the content. */
@@ -62,8 +32,6 @@ const FRAME_MS = 280
 const SETTLE_FRAMES = 36
 /** A safety for one long step: past this many frames with nothing changing, the mascot rests. */
 const MAX_FRAMES = 2000
-/** Colours the subagents' mascots take in turn, so each is told apart at a glance. */
-const AGENT_COLOURS = [TOKYO.blue, TOKYO.green, TOKYO.yellow, TOKYO.cyan, TOKYO.orange, TOKYO.red]
 /** The chime, a file of the plugin's own. */
 const CHIME = 'sounds/chime.wav'
 /** Context fill at which compacting is offered as the thing to do next. */
@@ -75,10 +43,9 @@ const BLOCK = {
   session: TOKYO.accent,
   usage: TOKYO.blue,
   rollover: TOKYO.cyan,
-  tree: TOKYO.green,
   plan: TOKYO.yellow,
   agents: TOKYO.orange,
-  sessions: TOKYO.red,
+  notes: TOKYO.green,
   actions: TOKYO.dim,
 } as const
 /** How often the pane's clocks and figures are refreshed while it is open. */
@@ -97,16 +64,13 @@ const EMPTY: Cockpit = {
   window: null,
   fiveHour: null,
   sevenDay: null,
-  repo: null,
-  isRepoChecked: false,
   todos: [],
   agents: [],
-  history: [],
-  sessionsPage: null,
   tickedAt: null,
-  diff: null,
   contextRows: null,
   armed: null,
+  respondedAt: null,
+  notes: '',
 }
 
 const state = atom({ plugin: 'cockpit', key: 'state' } as const, EMPTY)
@@ -135,7 +99,7 @@ export const mascotDefaults = (stored: Partial<MascotState> | null | undefined):
  * The state with every field present, whatever version wrote it.
  *
  * `$.state` outlives a reload, so a new version reads what an older one stored — without
- * the fields it added. Drawn as stored, the first of them (`diff`, read as undefined, not
+ * the fields it added. Drawn as stored, the first of them (`diff`, since removed, read as undefined, not
  * null) threw and left the pane blank. Every read goes through this, and the start of a
  * session writes it back once.
  */
@@ -145,181 +109,16 @@ export const withDefaults = (stored: Partial<Cockpit> | null | undefined): Cockp
   for (const key of Object.keys(EMPTY) as (keyof Cockpit)[]) {
     if (value[key] === undefined) (value as Record<string, unknown>)[key] = EMPTY[key]
   }
-  if (value.repo !== null && typeof value.repo.root !== 'string') {
-    value.repo = { ...value.repo, root: '' }
-  }
 
   return value
 }
 
-/** Tools whose calls change files, so the path is worth marking as this session's. */
-const WRITERS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
-
-/** Paths this session wrote to. Rebuilt on reload, which only dims the dots. */
-const mine = new Set<string>()
-
 const AGENTS_KEPT = 12
 
-/** This session's id, kept in the list even before anything has been typed in it. */
-let liveId = ''
-
-/** What a transcript said, and the mtime it said it at: re-read only once it changes. */
-type Known = Meta & { mtimeMs: number }
-
-/** What the transcripts read so far said, by session id. */
-const readKnown = async ($: EngineInterface): Promise<Record<string, Known>> => {
-  try {
-    const stored = await $.store.get(SESSIONS)
-    if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return {}
-
-    return Object.fromEntries(
-      Object.entries(stored as Record<string, unknown>).filter(
-        (pair): pair is [string, Known] =>
-          typeof pair[1] === 'object' && pair[1] !== null && typeof (pair[1] as Known).mtimeMs === 'number',
-      ),
-    )
-  } catch {
-    return {}
-  }
-}
-
-/** One transcript's title, prompt and directory, read whole or, past 4 MiB, grepped. */
-const readMeta = async ($: EngineInterface, found: Found): Promise<Meta | null> => {
-  try {
-    if (found.size <= MAX_READ_BYTES) return metaFromTranscript(await $.fs.read(`${found.dir}/${found.name}`))
-
-    const runs = await Promise.all(
-      grepArgv(found.name).map(argv => $.process.run(argv, { cwd: found.dir }).catch(() => null)),
-    )
-
-    return metaFromTranscript(runs.map(run => run?.stdout ?? '').join(String.fromCharCode(10)))
-  } catch {
-    // A transcript being written, or gone: it is listed by its id instead.
-    return null
-  }
-}
-
-/**
- * Claude Code's own sessions, every project's: what `/resume` lists.
- *
- * Every project keeps its transcripts in a folder of its own, side by side under one
- * `projects` directory — the parent of this session's. Each transcript is read once
- * and again only when it changes; listings after that only stat the folders.
- */
-const readSessions = async ($: EngineInterface, dir: string): Promise<Past[]> => {
-  if (dir === '') return []
-
-  const root = dir.split('/').slice(0, -1).join('/')
-  let folders: string[]
-  try {
-    folders = (await $.fs.list(root)).filter(one => one.kind === 'dir').map(one => `${root}/${one.name}`)
-  } catch {
-    folders = [dir]
-  }
-  if (!folders.includes(dir)) folders.push(dir)
-
-  const listed = await Promise.all(
-    folders.map(async folder => {
-      try {
-        return (await $.fs.list(folder)).map((entry): Found => ({ ...entry, dir: folder }))
-      } catch {
-        return []
-      }
-    }),
-  )
-  const recent = pickRecent(listed.flat(), SESSIONS_LISTED)
-  const known = await readKnown($)
-  const stale = recent.filter(one => known[idOf(one.name)]?.mtimeMs !== one.mtimeMs)
-
-  const read = await Promise.all(stale.map(async found => [found, await readMeta($, found)] as const))
-  for (const [found, meta] of read) {
-    if (meta !== null) known[idOf(found.name)] = { ...meta, mtimeMs: found.mtimeMs }
-  }
-
-  if (read.length > 0) {
-    // Only the sessions still listed are kept, so the store never outgrows the list.
-    const kept = Object.fromEntries(
-      recent.flatMap(one => {
-        const value = known[idOf(one.name)]
-
-        return value === undefined ? [] : [[idOf(one.name), value]]
-      }),
-    )
-    await $.store.set(SESSIONS, kept).catch(() => undefined)
-  }
-
-
-  // A session opened and left alone has nothing to resume; `/resume` leaves it out too.
-  return recent
-    .filter(one => {
-      const meta = known[idOf(one.name)]
-
-      return meta === undefined || isResumable(meta) || idOf(one.name) === liveId
-    })
-    .map(one => toPast(one, known[idOf(one.name)] ?? null))
-}
-
-/** Runs git, answering its output on success and '' on anything else. */
-const runGit = async ($: EngineInterface, argv: readonly string[], ok = [0]): Promise<string> => {
-  try {
-    const result = await $.process.run(['git', ...argv])
-
-    return ok.includes(result.exitCode) ? result.stdout : ''
-  } catch {
-    return ''
-  }
-}
-
-/** The repository a directory sits in, POSIX-spelled; '' outside one. */
-const rootOf = async ($: EngineInterface, dir: string): Promise<string> =>
-  dir === '' ? '' : toPosix((await runGit($, ['-C', dir, 'rev-parse', '--show-toplevel'])).trim())
-
-/**
- * The repository the pane shows. The session's directory when it is one; otherwise the
- * one the session last wrote a file in — a session started in a home directory still
- * works in a repository, and that is the one worth showing.
- */
-let repoDir = ''
-
-/** Re-read the working tree: two read-only git calls, or null with no repository. */
-const readRepo = async ($: EngineInterface): Promise<Repo | null> => {
-  if (repoDir === '') return null
-
-  const status = await runGit($, ['-C', repoDir, 'status', '--porcelain=v2', '--branch'])
-  if (status === '') return null
-  const numstat = await runGit($, ['-C', repoDir, 'diff', 'HEAD', '--numstat'])
-
-  return {
-    ...withCounts(parseStatus(status), parseNumstat(numstat), relativeTo(repoDir, mine)),
-    root: repoDir,
-  }
-}
-
-/**
- * Point the pane at the repository a written file sits in, when it is a different one.
- * Remembered, so the next launch outside any repository opens on it.
- */
-const followRepo = async ($: EngineInterface, file: string): Promise<void> => {
-  const root = await rootOf($, file.split('/').slice(0, -1).join('/'))
-  if (root === '' || root === repoDir) return
-
-  repoDir = root
-  await $.store.set(REPO, root).catch(() => undefined)
-  const repo = await readRepo($)
-  await update($, state, prev => ({ ...prev, repo, isRepoChecked: true }))
-}
-
-/** A file's diff against HEAD; an untracked file is shown as it stands. */
-const openDiff = async ($: EngineInterface, root: string, path: string, isUntracked: boolean): Promise<void> => {
-  let diff: OpenDiff
-  if (isUntracked) {
-    const text = await $.fs.read(`${root}/${path}`).catch(() => '')
-    diff = { path, source: capDiff(text === '' ? '(empty, or unreadable)' : text), format: 'source' }
-  } else {
-    const text = await runGit($, ['-C', root, 'diff', 'HEAD', '--', path])
-    diff = { path, source: capDiff(text === '' ? '(no changes against HEAD)' : text), format: 'diff' }
-  }
-  await update($, state, prev => ({ ...prev, diff }))
+/** Keep a project's notes, on every edit, so nothing typed is lost to a reload. */
+const saveNotes = async ($: EngineInterface, cwd: string | null, notes: string): Promise<void> => {
+  await update($, state, prev => ({ ...prev, notes }))
+  if (cwd !== null) await $.store.set(NOTES + cwd, notes).catch(() => undefined)
 }
 
 /** What fills the context, as /context counts it; a deferred row costs nothing yet. */
@@ -344,7 +143,7 @@ const readContextRows = async ($: EngineInterface): Promise<ContextRow[]> => {
 const pressAction = async ($: EngineInterface, action: string): Promise<void> => {
   if (action === 'new') {
     const it = withDefaults(await read($, state))
-    await openSession($, null, it.cwd ?? '.', 'terminal')
+    await openSession($, it.cwd ?? '.')
 
     return
   }
@@ -362,31 +161,14 @@ const pressAction = async ($: EngineInterface, action: string): Promise<void> =>
   await runCommand($, action)
 }
 
-/** The transcript directory, from the store when a classic hook has not named it yet. */
-const rememberedDir = async ($: EngineInterface): Promise<string> => {
-  try {
-    const stored = await $.store.get(DIR)
-
-    return typeof stored === 'string' ? stored : ''
-  } catch {
-    return ''
-  }
-}
-
 /**
- * Open a session in a terminal of its own, falling back to the clipboard.
+ * Open a fresh session in a terminal of its own, falling back to the clipboard.
  *
  * Nothing about the person's setup is assumed: the candidates are tried in order and
  * a click that finds no terminal still leaves them the command.
  */
-const openSession = async (
-  $: EngineInterface,
-  id: string | null,
-  cwd: string,
-  surface: 'terminal' | 'desktop' | 'vscode' | 'mobile',
-): Promise<void> => {
-  // No id: a session of its own, in the same directory.
-  const command = id === null ? 'claude' : resumeCommand(id)
+const openSession = async ($: EngineInterface, cwd: string): Promise<void> => {
+  const command = 'claude'
   // The transcript's path always says which platform this is; a cwd may not be known yet.
   const isWindows = isWindowsPath(transcriptPath === '' ? cwd : transcriptPath)
 
@@ -394,7 +176,7 @@ const openSession = async (
     try {
       const ran = await $.process.run(argv)
       if (ran.exitCode === 0) {
-        $.ui.toast(id === null ? 'Opening a new session' : `Opening ${id.slice(0, 8)} in a new terminal`)
+        $.ui.toast('Opening a new session')
 
         return
       }
@@ -403,7 +185,7 @@ const openSession = async (
     }
   }
 
-  const copied = await $.ui.copy({ text: command, surface }).catch(() => ({ isCopied: false }))
+  const copied = await $.ui.copy({ text: command, surface: 'terminal' }).catch(() => ({ isCopied: false }))
   $.ui.toast(copied.isCopied ? `Copied: ${command}` : `Run it yourself: ${command}`)
 }
 
@@ -574,9 +356,9 @@ const startTicking = ($: EngineInterface): void => {
   })()
 }
 
-export const register: Register = on => {
-  /** The transcript directory for this project, once anything has named it. */
-  let dir = ''
+export const register: Register = (on, options) => {
+  // Mods cannot read the engine's cache TTL, so the person states it (1h on a subscription).
+  const cacheTtlMs = options.cacheTtl === '5m' ? 5 * 60_000 : 60 * 60_000
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'cockpit', description: 'Open the cockpit pane' })
@@ -584,20 +366,14 @@ export const register: Register = on => {
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
-    const [now, cwd, id, usage, model, turns, storedDir, storedRepo] = await Promise.all([
-      $.clock.now(),
+    const [cwd, id, usage, model, turns] = await Promise.all([
       $.session.cwd().catch(() => ''),
       $.session.id().catch(() => ''),
       $.session.usage().catch(() => null),
       $.session.model().catch(() => null),
       $.session.turns().catch(() => null),
-      rememberedDir($),
-      $.store.get(REPO).catch(() => null),
     ])
-
-    if (id !== '') liveId = id
-    repoDir = (await rootOf($, cwd)) || (typeof storedRepo === 'string' ? storedRepo : '')
-    const repo = await readRepo($)
+    const notes = cwd === '' ? null : await $.store.get(NOTES + toPosix(cwd)).catch(() => null)
 
     const segments = toPosix(cwd).split('/').filter(one => one !== '')
     await update($, state, prev => ({
@@ -608,21 +384,13 @@ export const register: Register = on => {
       sessionId: id === '' ? null : id,
       model: model === null ? prev.model : modelLabel(model),
       turns: turns ?? prev.turns,
-      repo,
-      isRepoChecked: true,
+      notes: typeof notes === 'string' ? notes : '',
     }))
-
-    // A reload, or a session opened before any prompt, still has a directory to list.
-    if (storedDir !== '') {
-      dir = storedDir
-      const history = await readSessions($, storedDir)
-      await update($, state, prev => ({ ...prev, history }))
-    }
 
     // Opened unasked, the pane seats itself only once the terminal is wide enough.
     void $.ui.open({ id: PANE, title: 'cockpit' })
     startTicking($)
-    // Subagents already at work when this loads — a reload mid-task — get their mascots too.
+    // Subagents already at work when this loads — a reload mid-task — keep the shimmer going.
     await syncAgents($)
 
     return next(e)
@@ -650,14 +418,7 @@ export const register: Register = on => {
       const mode = e.permission_mode
       await update($, state, prev => ({ ...prev, mode }))
     }
-    if (typeof e.transcript_path === 'string' && e.transcript_path !== '') {
-      transcriptPath = e.transcript_path
-      const named = dirOf(e.transcript_path)
-      if (named !== dir) {
-        dir = named
-        await $.store.set(DIR, named).catch(() => undefined)
-      }
-    }
+    if (typeof e.transcript_path === 'string' && e.transcript_path !== '') transcriptPath = e.transcript_path
 
     return next(e)
   })
@@ -699,21 +460,8 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The classic inputs carry this session's transcript_path, and Claude Code keeps every
-  // session's transcript beside it — so the list is its sessions, not the mod's bookkeeping.
   on('classic.SessionStart', async ($, e, next) => {
-    const path = typeof e.transcript_path === 'string' ? e.transcript_path : ''
-    if (path !== '') {
-      transcriptPath = path
-      liveId = idOf(toPosix(path).split('/').at(-1) ?? '')
-    }
-    const named = path === '' ? '' : dirOf(path)
-    if (named !== '') {
-      dir = named
-      await $.store.set(DIR, named).catch(() => undefined)
-      const history = await readSessions($, named)
-      await update($, state, prev => ({ ...prev, history }))
-    }
+    if (typeof e.transcript_path === 'string' && e.transcript_path !== '') transcriptPath = e.transcript_path
 
     return next(e)
   })
@@ -726,7 +474,14 @@ export const register: Register = on => {
       effort: e.effort === undefined ? null : String(e.effort),
     }))
 
-    return yield* next(e)
+    const result = yield* next(e)
+    // The main loop's request just wrote or read the prompt cache: it stays warm a TTL from now.
+    if ((e as { agentId?: string }).agentId === undefined) {
+      const respondedAt = Date.now()
+      await update($, state, prev => ({ ...prev, respondedAt }))
+    }
+
+    return result
   })
 
   on('session.measure', async ($, e, next) => {
@@ -750,11 +505,6 @@ export const register: Register = on => {
       ...(todos === null ? {} : { todos }),
       ...(isAgent ? { agents: [...prev.agents, entry].slice(-AGENTS_KEPT) } : {}),
     }))
-
-    if (WRITERS.has(e.tool) && subject !== '') {
-      mine.add(toPosix(subject))
-      await followRepo($, toPosix(subject))
-    }
 
     // The main loop's calls are the mascot's; a subagent's walk under their own mascots.
     const isMain = (e as { agentId?: string }).agentId === undefined
@@ -790,7 +540,6 @@ export const register: Register = on => {
     return result
   })
 
-  // The working tree is re-read between turns, not per edit: one pair of git calls a turn.
   on('turn.complete', async ($, e, next) => {
     // A subagent's turn ending says nothing about the main one.
     if ((e as { agentId?: string }).agentId === undefined) {
@@ -813,24 +562,17 @@ export const register: Register = on => {
       }
     }
 
-    const [repo, turns, history] = await Promise.all([
-      readRepo($),
-      $.session.turns().catch(() => null),
-      dir === '' ? Promise.resolve(null) : readSessions($, dir),
-    ])
-    await update($, state, prev => ({
-      ...prev,
-      repo,
-      isRepoChecked: true,
-      turns,
-      history: history ?? prev.history,
-    }))
+    const turns = await $.session.turns().catch(() => null)
+    await update($, state, prev => ({ ...prev, turns }))
 
     return next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Code, Text } = $.ui.resolve(e)
+    const elements = $.ui.resolve(e)
+    const { Box, Button, Text } = elements
+    // The mobile app draws no field yet: there the notes are shown, not edited.
+    const Input = 'Input' in elements ? elements.Input : null
     const now = Date.now()
     const it = withDefaults(await read($, state))
     // The gutter comes out of the width, so every block still fits on one line.
@@ -839,7 +581,6 @@ export const register: Register = on => {
     const columns = outer - BLOCK_INSET
     const rows = Math.max(8, e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 24)
 
-    const changes = it.repo?.changes ?? []
     const open = it.todos.filter(one => one.status !== 'completed')
     const doneCount = it.todos.length - open.length
 
@@ -849,18 +590,9 @@ export const register: Register = on => {
     const rollover = rolloverView(rolled?.value, now, columns)
     const rolloverRows = rollover.kind === 'unavailable' ? 3 : rollover.rows.length + 2
 
-    // The mascots, under the sessions. Reading their slot subscribes the pane to their frames.
+    // The shimmer's frame. Reading it subscribes the pane, so the bar moves while work does.
     const m = mascotDefaults(await read($, mascot))
-    // Each sprite is nine columns and two apart; the session's own comes first, then as
-    // many subagents as fit beside it.
-    const fits = Math.max(1, Math.floor((columns + 2) / 11))
-    const agents = m.agents.slice(0, fits - 1)
-    const hidden = m.agents.length - agents.length
-    const mascotRows = (agents.length > 0 ? 5 : 4) + 2
 
-    // The lists share what is left under the fixed rows; each keeps at least two.
-    const listRoom = Math.max(3, Math.floor((rows - 25 - rolloverRows - mascotRows) / 2))
-    const repoName = shortText(it.repo?.root.split('/').at(-1) ?? '', Math.max(6, Math.floor(columns / 2)))
     const isArmed = (action: string): boolean =>
       it.armed !== null && it.armed.action === action && now - it.armed.at <= ARM_MS
     const actionLabel = (action: string): string => {
@@ -869,8 +601,6 @@ export const register: Register = on => {
 
       return action
     }
-    const added = changes.reduce((sum, one) => sum + one.added, 0)
-    const removed = changes.reduce((sum, one) => sum + one.removed, 0)
 
     /**
      * A block: a rounded frame in its own colour, the title set into the top edge,
@@ -963,105 +693,6 @@ export const register: Register = on => {
       )
     }
 
-    /** One session: marked when live, its title, then how long ago and which project. */
-    const SessionRow = ({ past }: { past: Past }) => {
-      const isLive = past.id === it.sessionId
-      const isHere = past.project === it.project
-      const tail = isHere ? ` ${ago(past.at, now)}` : ` ${ago(past.at, now)} · ${shortText(past.project, 12)}`
-
-      return (
-        <Box key={`past-row-${past.id}`}>
-          <Text color={isLive ? TOKYO.orange : TOKYO.dim}>{isLive ? '▸ ' : '  '}</Text>
-          <Button
-            key={`past-${past.id}`}
-            plain
-            label={shortText(past.title, Math.max(6, columns - 2 - tail.length))}
-            onPress={() => openSession($, past.id, past.cwd ?? it.cwd ?? '.', e.surface)}
-          />
-          <Text color={TOKYO.dim}>{tail}</Text>
-        </Box>
-      )
-    }
-
-    if (it.sessionsPage !== null) {
-      // Everything but the list's frame and the footer block is the list.
-      const perPage = Math.max(3, rows - 5)
-      const pages = Math.max(1, Math.ceil(it.history.length / perPage))
-      const page = Math.min(it.sessionsPage, pages - 1)
-      const shown = it.history.slice(page * perPage, (page + 1) * perPage)
-      const toPage = (to: number) => update($, state, prev => ({ ...prev, sessionsPage: to }))
-      const pageNote = pages > 1 ? ` · page ${page + 1}/${pages}` : ''
-
-      return (
-        <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
-          {Section({
-            id: 'all-sessions',
-            title: 'ALL SESSIONS',
-            count: `${it.history.length}${pageNote}`,
-            color: BLOCK.sessions,
-            height: perPage,
-            rows: shown.map(past => SessionRow({ past })),
-          })}
-          {Section({
-            id: 'sessions-actions',
-            title: 'ACTIONS',
-            color: BLOCK.actions,
-            rows: [
-              <Box>
-                <Button
-                  key="sessions-close"
-                  plain
-                  label="← back"
-                  onPress={() => update($, state, prev => ({ ...prev, sessionsPage: null }))}
-                />
-                {page > 0 && (
-                  <Box>
-                    <Text color={TOKYO.dim}> · </Text>
-                    <Button key="sessions-prev" plain label="‹ newer" onPress={() => toPage(page - 1)} />
-                  </Box>
-                )}
-                {page < pages - 1 && (
-                  <Box>
-                    <Text color={TOKYO.dim}> · </Text>
-                    <Button key="sessions-next" plain label="older ›" onPress={() => toPage(page + 1)} />
-                  </Box>
-                )}
-              </Box>,
-            ],
-          })}
-        </Box>
-      )
-    }
-
-    if (it.diff !== null) {
-      const { path, source, format } = it.diff
-
-      return (
-        <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
-          {Section({
-            id: 'diff',
-            title: shortPath(path, Math.max(8, outer - 8)),
-            color: BLOCK.tree,
-            height: Math.max(3, rows - 5),
-            body: <Code source={source} path={path} format={format} wrap="truncate-end" />,
-          })}
-          {Section({
-            id: 'diff-actions',
-            title: 'ACTIONS',
-            color: BLOCK.actions,
-            rows: [
-              <Button
-                key="diff-close"
-                plain
-                label="← back"
-                onPress={() => update($, state, prev => ({ ...prev, diff: null }))}
-              />,
-            ],
-          })}
-        </Box>
-      )
-    }
-
     const contextRows: RenderChildren[] =
       it.context === null
         ? [<Text color={TOKYO.dim}>ctx   waiting for the first response</Text>]
@@ -1095,52 +726,30 @@ export const register: Register = on => {
             )),
           ]
 
-    const treeRows: RenderChildren[] =
-      it.repo === null
-        ? [<Text color={TOKYO.dim}>{it.isRepoChecked ? 'not a git repository' : 'reading git…'}</Text>]
-        : [
-            <Box>
-              <Text color={TOKYO.text}>{repoName}</Text>
-              <Text color={TOKYO.dim}> · </Text>
-              <Text color={TOKYO.blue}>
-                {shortText(it.repo.branch ?? 'detached', Math.max(8, columns - repoName.length - 8))}
-              </Text>
-              {it.repo.ahead > 0 && <Text color={TOKYO.green}> ↑{it.repo.ahead}</Text>}
-              {it.repo.behind > 0 && <Text color={TOKYO.yellow}> ↓{it.repo.behind}</Text>}
-            </Box>,
-            <Box>
-              <Text color={TOKYO.green}>+{added}</Text>
-              <Text color={TOKYO.red}> -{removed}</Text>
-              <Text color={TOKYO.dim}>
-                {' '}
-                in {changes.length} {changes.length === 1 ? 'file' : 'files'}
-              </Text>
-            </Box>,
-            ...changes.slice(0, listRoom).map(change => (
-              <Box>
-                <Text color={change.isMine ? TOKYO.orange : TOKYO.dim}>{change.isMine ? '●' : ' '}</Text>
-                <Text color={change.status === '?' ? TOKYO.dim : TOKYO.yellow}>{change.status} </Text>
-                <Button
-                  key={`diff-${change.path}`}
-                  plain
-                  label={shortPath(change.path, Math.max(6, columns - 14)).padEnd(Math.max(7, columns - 13))}
-                  onPress={() => openDiff($, it.repo?.root ?? '', change.path, change.status === '?')}
-                />
-                <Text color={TOKYO.green}>+{change.added}</Text>
-                <Text color={TOKYO.red}> -{change.removed}</Text>
-              </Box>
-            )),
-          ]
+    const usageRows = only(
+      ...contextRows,
+      it.fiveHour !== null && Meter({ label: '5h', percent: it.fiveHour.percent, resetsAt: it.fiveHour.resetsAt }),
+      it.sevenDay !== null && Meter({ label: 'week', percent: it.sevenDay.percent, resetsAt: it.sevenDay.resetsAt }),
+    )
 
-    const hasMore = it.history.length > SESSIONS_SHOWN
-    const mascotColour =
-      m.activity === 'alert'
-        ? TOKYO.red
-        : m.activity === 'waiting'
-          ? TOKYO.yellow
-          : m.activity === 'done'
-            ? TOKYO.green
-            : TOKYO.accent
+    // The notes take every row the other blocks leave: each block is its rows and two of frame.
+    const planRows = it.todos.length > 0 ? Math.min(open.length, PLAN_SHOWN) + 2 : 0
+    const agentRows = it.agents.length > 0 ? Math.min(it.agents.length, 3) + 2 : 0
+    const fixed = 4 + (usageRows.length + 2) + rolloverRows + planRows + agentRows + 1 + 3
+    const noteRows = Math.max(3, rows - fixed - 2)
+
+    // The progress line: context fill as a purple shimmer, turning to heat once a rollover nears.
+    const cache = cacheView(it.respondedAt, now, cacheTtlMs)
+    const cacheText =
+      cache === null ? '' : cache.isWarm ? `☕ warm ${cache.left}` : '🧊 cold · start fresh'
+    const cacheColour =
+      cache === null ? TOKYO.dim : !cache.isWarm ? TOKYO.blue : cache.leftMs < 5 * 60_000 ? TOKYO.yellow : TOKYO.green
+    const percent = it.context ?? 0
+    const isNear =
+      rollover.kind !== 'unavailable' && it.tokens !== null
+        ? it.tokens >= rollover.status.thresholds.soft
+        : percent >= COMPACT_AT
+    const cells = shimmer(percent, Math.max(6, columns - cacheText.length - 6), m.frame)
 
     return (
       <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
@@ -1177,13 +786,7 @@ export const register: Register = on => {
             id: 'usage',
             title: 'USAGE',
             color: BLOCK.usage,
-            rows: only(
-              ...contextRows,
-              it.fiveHour !== null &&
-                Meter({ label: '5h', percent: it.fiveHour.percent, resetsAt: it.fiveHour.resetsAt }),
-              it.sevenDay !== null &&
-                Meter({ label: 'week', percent: it.sevenDay.percent, resetsAt: it.sevenDay.resetsAt }),
-            ),
+            rows: usageRows,
           })}
 
           {Section({
@@ -1208,21 +811,13 @@ export const register: Register = on => {
                   )),
           })}
 
-          {Section({
-            id: 'tree',
-            title: 'WORKING TREE',
-            count: it.repo === null ? undefined : changes.length,
-            color: BLOCK.tree,
-            rows: treeRows,
-          })}
-
           {it.todos.length > 0 &&
             Section({
               id: 'plan',
               title: 'PLAN',
               count: `${doneCount}/${it.todos.length}`,
               color: BLOCK.plan,
-              rows: open.slice(0, listRoom + 1).map(todo => (
+              rows: open.slice(0, PLAN_SHOWN).map(todo => (
                 <Box>
                   <Text color={todo.status === 'in_progress' ? TOKYO.orange : TOKYO.dim}>
                     {todo.status === 'in_progress' ? '▸ ' : '· '}
@@ -1251,65 +846,37 @@ export const register: Register = on => {
             })}
 
           {Section({
-            id: 'sessions',
-            title: 'SESSIONS',
-            count: it.history.length,
-            color: BLOCK.sessions,
-            // ' · all ›' on the top edge, a press away from the full list.
-            extraWidth: hasMore ? 8 : 0,
-            extra: hasMore && (
-              <Box>
-                <Text color={TOKYO.dim}> · </Text>
-                <Button
-                  key="sessions-all"
-                  plain
-                  label="all ›"
-                  onPress={() => update($, state, prev => ({ ...prev, sessionsPage: 0 }))}
+            id: 'notes',
+            title: 'NOTES',
+            color: BLOCK.notes,
+            height: noteRows,
+            body:
+              Input === null ? (
+                <Text color={TOKYO.text}>{it.notes}</Text>
+              ) : (
+                <Input
+                  key="notes"
+                  rows={noteRows}
+                  value={it.notes}
+                  placeholder="jot anything…"
+                  submitLabel="save"
+                  onInput={(value: string) => saveNotes($, it.cwd, value)}
+                  onSubmit={(value: string) => saveNotes($, it.cwd, value)}
                 />
-              </Box>
-            ),
-            rows: only(
-              it.history.length === 0 && <Text color={TOKYO.dim}>no transcripts found</Text>,
-              ...it.history.slice(0, SESSIONS_SHOWN).map(past => SessionRow({ past })),
-              it.history.length > 0 && (
-                <Text color={TOKYO.dim}>{shortText('press a session to open it in a new terminal', columns)}</Text>
               ),
-            ),
           })}
+        </Box>
 
-          {Section({
-            id: 'mascots',
-            title: 'MASCOTS',
-            count: m.agents.length > 0 ? `${m.agents.length} ${m.agents.length === 1 ? 'agent' : 'agents'}` : undefined,
-            color: mascotColour,
-            rows: only(
-              ...[0, 1, 2].map(row => (
-                <Box>
-                  <Text color={mascotColour}>{spriteFor(m.activity, m.frame)[row]}</Text>
-                  {agents.map((agent, index) => (
-                    <Text key={`agent-${agent.id}-${row}`} color={AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue}>
-                      {`  ${spriteFor('running', m.frame + index)[row]}`}
-                    </Text>
-                  ))}
-                </Box>
-              )),
-              // Each subagent's task under its own sprite; the session's slot left blank.
-              agents.length > 0 && (
-                <Box>
-                  <Text>{' '.repeat(9)}</Text>
-                  {agents.map((agent, index) => (
-                    <Text key={`agent-label-${agent.id}`} color={AGENT_COLOURS[index % AGENT_COLOURS.length] ?? TOKYO.blue}>
-                      {`  ${shortText(agent.label, 9).padEnd(9)}`}
-                    </Text>
-                  ))}
-                  {hidden > 0 && <Text color={TOKYO.dim}> +{hidden}</Text>}
-                </Box>
-              ),
-              <Text color={mascotColour} bold>
-                {shortText(describe(m.activity, m.detail), columns)}
-              </Text>,
-            ),
-          })}
+        <Box key="progress" height={1}>
+          <Text>{' '}</Text>
+          {cells.map((cell, index) => (
+            <Text key={`cell-${index}`} color={cell.color === null ? TOKYO.line : isNear ? heatOf(percent) : cell.color}>
+              {cell.char}
+            </Text>
+          ))}
+          <Text color={isNear ? heatOf(percent) : TOKYO.accent}> {`${Math.round(percent)}%`}</Text>
+          {cacheText !== '' && <Text color={TOKYO.dim}> · </Text>}
+          {cacheText !== '' && <Text color={cacheColour}>{cacheText}</Text>}
         </Box>
 
         {Section({

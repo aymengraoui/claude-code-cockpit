@@ -30,3 +30,23 @@ export const fromUsage = (
   fiveHour: windowOf(reading.rateLimits, 'five_hour') ?? prev.fiveHour,
   sevenDay: windowOf(reading.rateLimits, 'seven_day') ?? prev.sevenDay,
 })
+
+/**
+ * Whether the prompt cache still holds this session, and for how long: `42m`, `1h05`,
+ * `<1m`. Warm from the main loop's last response until a TTL later; null before any.
+ */
+export const cacheView = (
+  respondedAt: number | null,
+  now: number,
+  ttlMs: number,
+): { isWarm: boolean; left: string; leftMs: number } | null => {
+  if (respondedAt === null) return null
+  const leftMs = respondedAt + ttlMs - now
+  if (leftMs <= 0) return { isWarm: false, left: '', leftMs: 0 }
+
+  const minutes = Math.floor(leftMs / 60000)
+  const left =
+    minutes < 1 ? '<1m' : minutes >= 60 ? `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}` : `${minutes}m`
+
+  return { isWarm: true, left, leftMs }
+}
