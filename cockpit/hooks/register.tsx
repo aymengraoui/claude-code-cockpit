@@ -25,11 +25,11 @@ const BLOCK_INSET = 4
 /** The quick actions, each the engine's own command; the one that discards comes last. */
 const QUICK_ACTIONS = ['new', 'compact', 'rewind', 'resume', 'clear'] as const
 /** How fast the shimmer moves: a frame every this many milliseconds. */
-const FRAME_MS = 280
+const FRAME_MS = 140
 /** Frames the shimmer keeps moving after work finishes, fails or waits: about ten seconds. */
-const SETTLE_FRAMES = 36
+const SETTLE_FRAMES = 72
 /** A safety for one long step: past this many frames with nothing changing, the shimmer rests. */
-const MAX_FRAMES = 2000
+const MAX_FRAMES = 4000
 /** The chime, a file of the plugin's own. */
 const CHIME = 'sounds/chime.wav'
 /** The tool the model reports its plan through, as the engine names it. */
@@ -253,7 +253,7 @@ const startAnimating = ($: EngineInterface): void => {
           last = now.activity
           still = 0
         }
-        if (now.agents.length > 0 && now.frame % 4 === 0) await syncAgents($)
+        if (now.agents.length > 0 && now.frame % 8 === 0) await syncAgents($)
         const busy = WORKING.has(now.activity) || now.agents.length > 0
         const limit = busy ? MAX_FRAMES : now.activity === 'idle' ? 0 : SETTLE_FRAMES
         if (still >= limit) break
@@ -385,7 +385,9 @@ export const register: Register = (on, options) => {
       },
       isDeferred: false,
     }).catch(() => undefined)
-    await update($, state, prev => withDefaults(prev))
+    // A stored plan belongs to the session that wrote it; the new one starts with none.
+    // shortcut: a reload also clears a live plan, until the model next reports its steps.
+    await update($, state, prev => ({ ...withDefaults(prev), todos: [] }))
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
@@ -751,7 +753,8 @@ export const register: Register = (on, options) => {
       cache === null ? '' : cache.isWarm ? `☕ warm ${cache.left}` : '🧊 cold · start fresh'
     const cacheColour =
       cache === null ? TOKYO.dim : !cache.isWarm ? TOKYO.blue : cache.leftMs < 5 * 60_000 ? TOKYO.yellow : TOKYO.green
-    const percent = it.todos.length === 0 ? 0 : (doneCount / it.todos.length) * 100
+    // With no plan the bar is full, the shimmer's crest sweeping the whole of it.
+    const percent = it.todos.length === 0 ? 100 : (doneCount / it.todos.length) * 100
     const progressText = it.todos.length === 0 ? 'no plan' : `${Math.round(percent)}%`
     // The figures take ` 60% · ` beside the cache text; a spare column covers a wide emoji.
     const cells = shimmer(percent, Math.max(6, columns - cacheText.length - progressText.length - 5), m.frame)
