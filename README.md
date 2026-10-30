@@ -27,7 +27,9 @@ for your own notes.
 │ - parser: try the slow path    │
 │                                │
 ╰────────────────────────────────╯
- ▰▰▰▰▰▰▰▱▱▱▱▱▱ 37% · ☕ warm 48m
+╭─ CONTEXT ──────────────────────╮
+│ ▰▰▰▰▰▰▱▱▱▱▱ 37% · ☕ warm 48m   │
+╰────────────────────────────────╯
 ╭─ ACTIONS ──────────────────────╮
 │ new · compact · rewind · resu… │
 ╰────────────────────────────────╯
@@ -45,7 +47,7 @@ the mobile app, which draws no text field yet, the notes are shown, not edited.
 
 ## The progress line
 
-The line above the actions is the session at a glance:
+The **CONTEXT** block above the actions is the session at a glance:
 
 - **Context fill** as a purple shimmer that sweeps while Claude works. It turns to heat colours
   once a rollover (or, without the rollover mod, a compact) is near.

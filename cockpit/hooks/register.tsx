@@ -46,6 +46,7 @@ const BLOCK = {
   plan: TOKYO.yellow,
   agents: TOKYO.orange,
   notes: TOKYO.green,
+  progress: TOKYO.accent,
   actions: TOKYO.dim,
 } as const
 /** How often the pane's clocks and figures are refreshed while it is open. */
@@ -726,7 +727,7 @@ export const register: Register = (on, options) => {
     // The notes take every row the other blocks leave: each block is its rows and two of frame.
     const planRows = it.todos.length > 0 ? Math.min(open.length, PLAN_SHOWN) + 2 : 0
     const agentRows = it.agents.length > 0 ? Math.min(it.agents.length, 3) + 2 : 0
-    const fixed = 4 + (usageRows.length + 2) + rolloverRows + planRows + agentRows + 1 + 3
+    const fixed = 4 + (usageRows.length + 2) + rolloverRows + planRows + agentRows + 3 + 3
     const noteRows = Math.max(3, rows - fixed - 2)
 
     // The progress line: context fill as a purple shimmer, turning to heat once a rollover nears.
@@ -740,7 +741,8 @@ export const register: Register = (on, options) => {
       rollover.kind !== 'unavailable' && it.tokens !== null
         ? it.tokens >= rollover.status.thresholds.soft
         : percent >= COMPACT_AT
-    const cells = shimmer(percent, Math.max(6, columns - cacheText.length - 6), m.frame)
+    // The figures take ` 37% · ` beside the cache text; a spare column covers a wide emoji.
+    const cells = shimmer(percent, Math.max(6, columns - cacheText.length - 9), m.frame)
 
     return (
       <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
@@ -859,17 +861,23 @@ export const register: Register = (on, options) => {
             })}
         </Box>
 
-        <Box key="progress" height={1}>
-          <Text>{' '}</Text>
-          {cells.map((cell, index) => (
-            <Text key={`cell-${index}`} color={cell.color === null ? TOKYO.line : isNear ? heatOf(percent) : cell.color}>
-              {cell.char}
-            </Text>
-          ))}
-          <Text color={isNear ? heatOf(percent) : TOKYO.accent}> {`${Math.round(percent)}%`}</Text>
-          {cacheText !== '' && <Text color={TOKYO.dim}> · </Text>}
-          {cacheText !== '' && <Text color={cacheColour}>{cacheText}</Text>}
-        </Box>
+        {Section({
+          id: 'progress',
+          title: 'CONTEXT',
+          color: BLOCK.progress,
+          rows: [
+            <Box key="progress" height={1}>
+              {cells.map((cell, index) => (
+                <Text key={`cell-${index}`} color={cell.color === null ? TOKYO.line : isNear ? heatOf(percent) : cell.color}>
+                  {cell.char}
+                </Text>
+              ))}
+              <Text color={isNear ? heatOf(percent) : TOKYO.accent}> {`${Math.round(percent)}%`}</Text>
+              {cacheText !== '' && <Text color={TOKYO.dim}> · </Text>}
+              {cacheText !== '' && <Text color={cacheColour}>{cacheText}</Text>}
+            </Box>,
+          ],
+        })}
 
         {Section({
           id: 'actions',
