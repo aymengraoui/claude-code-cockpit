@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { Activity, Cockpit, ContextRow, MascotState } from '../types'
+import type { Cockpit, ContextRow, MascotState } from '../types'
 import { bar, kilo, footerMode, modelLabel, shimmer, SHIMMER, spoken, shortText, toPosix, until } from './lib/format'
 import { subjectOf, todosOf } from './lib/tools'
 import { isWindowsPath, launchCommands } from './lib/launch'
@@ -65,7 +65,6 @@ const EMPTY: Cockpit = {
   fiveHour: null,
   sevenDay: null,
   todos: [],
-  agents: [],
   tickedAt: null,
   contextRows: null,
   armed: null,
@@ -113,7 +112,6 @@ export const withDefaults = (stored: Partial<Cockpit> | null | undefined): Cockp
   return value
 }
 
-const AGENTS_KEPT = 12
 
 /** Keep a project's notes, on every edit, so nothing typed is lost to a reload. */
 const saveNotes = async ($: EngineInterface, cwd: string | null, notes: string): Promise<void> => {
@@ -492,26 +490,18 @@ export const register: Register = (on, options) => {
     // This build carries a tool's arguments on `e` itself; an older one carried them under `input`.
     const input = ((e as { input?: unknown }).input ?? e) as Record<string, unknown>
     const subject = subjectOf(e.tool, input)
-    const entry: Activity = { id: e.tool_use_id, tool: e.tool, subject, ms: null }
     const isAgent = e.tool === 'Agent'
 
     // The plan is the tool's own payload, so the pane shows it as Claude writes it.
     const todos = e.tool === 'TodoWrite' ? todosOf(input) : null
-
-    await update($, state, prev => ({
-      ...prev,
-      ...(todos === null ? {} : { todos }),
-      ...(isAgent ? { agents: [...prev.agents, entry].slice(-AGENTS_KEPT) } : {}),
-    }))
+    if (todos !== null) await update($, state, prev => ({ ...prev, todos }))
 
     // Only the main loop's calls set the activity; a subagent's are its own business.
     const isMain = (e as { agentId?: string }).agentId === undefined
     const what = shortText(aboutCall(e.tool, subject), 40)
     if (isMain && !isAgent) await act($, activityOfTool(e.tool))
 
-    const startedAt = await $.clock.now()
     const result = await next(e)
-    const ms = (await $.clock.now()) - startedAt
 
     if (isMain && !isAgent) {
       if (result.isError === true) {
@@ -522,13 +512,7 @@ export const register: Register = (on, options) => {
       }
     }
 
-    if (isAgent) {
-      await syncAgents($)
-      await update($, state, prev => ({
-        ...prev,
-        agents: prev.agents.map(one => (one.id === entry.id ? { ...one, ms } : one)),
-      }))
-    }
+    if (isAgent) await syncAgents($)
 
     return result
   })
@@ -726,7 +710,7 @@ export const register: Register = (on, options) => {
 
     // The notes take every row the other blocks leave: each block is its rows and two of frame.
     const planRows = it.todos.length > 0 ? Math.min(open.length, PLAN_SHOWN) + 2 : 0
-    const agentRows = it.agents.length > 0 ? Math.min(it.agents.length, 3) + 2 : 0
+    const agentRows = m.agents.length > 0 ? Math.min(m.agents.length, 3) + 2 : 0
     const fixed = 4 + (usageRows.length + 2) + rolloverRows + planRows + agentRows + 3 + 3
     const noteRows = Math.max(3, rows - fixed - 2)
 
@@ -844,20 +828,23 @@ export const register: Register = (on, options) => {
           })}
 
           {/* Last before the progress line, so the work under way sits beside the context it uses. */}
-          {it.agents.length > 0 &&
+          {/* The engine's live list, as the band above the prompt shows it: gone once none run. */}
+          {m.agents.length > 0 &&
             Section({
               id: 'agents',
               title: 'AGENTS',
-              count: it.agents.filter(one => one.ms === null).length,
+              count: m.agents.length,
               color: BLOCK.agents,
-              rows: it.agents.slice(-3).map(agent => (
-                <Box>
-                  <Text color={agent.ms === null ? TOKYO.orange : TOKYO.dim}>
-                    {agent.ms === null ? '⟳ ' : '· '}
-                  </Text>
-                  <Text color={TOKYO.text}>{shortText(agent.subject, Math.max(4, columns - 3))}</Text>
-                </Box>
-              )),
+              rows: m.agents.slice(0, 3).map((agent, index) => {
+                const time = agent.at === undefined ? '' : ` ${spoken(now - agent.at)}`
+                return (
+                  <Box key={agent.id}>
+                    <Text color={SHIMMER[(m.frame + index * 3) % SHIMMER.length] ?? TOKYO.orange}>⟳ </Text>
+                    <Text color={TOKYO.text}>{shortText(agent.label, Math.max(4, columns - 3 - time.length))}</Text>
+                    <Text color={TOKYO.dim}>{time}</Text>
+                  </Box>
+                )
+              }),
             })}
         </Box>
 

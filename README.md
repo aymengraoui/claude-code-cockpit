@@ -69,7 +69,7 @@ same shimmer and how long it has been running:
 ```
 
 The band is gone the moment none run, and the prompt area is the engine's own again. The
-pane's **AGENTS** block, just above the progress line, keeps the last few for reference.
+pane's **AGENTS** block, just above the progress line, lists the same live agents and clears with them.
 
 A soft chime, with a toast, marks the moments attention has most likely wandered: a
 permission prompt, and the end of a turn that ran longer than 30 seconds. Short turns stay
@@ -131,7 +131,7 @@ process it ever starts is the terminal `new` opens:
 | context fill, 5h and weekly windows | `session.measure` |
 | what fills the context | `$.session.usage({ breakdown: 'summary' })`, the categories `/context` counts |
 | the prompt cache | the time of the last response, plus the TTL you set |
-| running subagents | `$.agent.list()`, timed from when each is first seen |
+| running subagents (band and AGENTS) | `$.agent.list()`, timed from when each is first seen |
 | notes | `$.store`, keyed by project |
 | context rollover | `$.state` `context-rollover.status`, published by the [context-rollover](./rollover) mod |
 

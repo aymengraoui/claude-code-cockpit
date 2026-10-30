@@ -1,14 +1,3 @@
-/** One running or finished subagent, newest last. */
-export type Activity = {
-  id: string
-  /** Tool name as the engine calls it (`Edit`, `Bash`, `Agent`, ...). */
-  tool: string
-  /** The call's subject: a path, a command, an agent's description. */
-  subject: string
-  /** Wall-clock duration, once the call has returned; null while it runs. */
-  ms: number | null
-}
-
 /** A rate-limit window as the engine reports it. */
 export type Window = { percent: number; resetsAt: string | null }
 
@@ -40,7 +29,6 @@ export type Cockpit = {
   fiveHour: Window | null
   sevenDay: Window | null
   todos: Todo[]
-  agents: Activity[]
   /** When the live ticker last looked; a redraw of the clocks hangs off it. */
   tickedAt: number | null
   /** The context breakdown, when it is open; null while closed. */
