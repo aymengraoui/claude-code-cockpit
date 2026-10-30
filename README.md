@@ -1,10 +1,12 @@
 # cockpit
 
-A sidebar for [Claude Code](https://claude.com/claude-code) in the terminal.
+A sidebar for [Claude Code](https://claude.com/claude-code) in the terminal, and the
+[context-rollover](./rollover) mod beside it.
 
 The desktop app shows you where a session stands. The terminal makes you guess: how full the
-context is, what the session has cost, which files changed, what Claude just ran, whether that
-subagent is still going. `cockpit` puts all of it in a pane beside the conversation.
+context is, what the session has cost, whether the prompt cache is still warm, whether that
+subagent is still going. `cockpit` puts all of it in a pane beside the conversation, with room
+for your own notes.
 
 ```
 ╭─ SESSION 7 turns ──────────────╮
@@ -13,60 +15,59 @@ subagent is still going. `cockpit` puts all of it in a pane beside the conversat
 ╰────────────────────────────────╯
 ╭─ USAGE ────────────────────────╮
 │ ctx  ▰▰▱▱▱  37% 74k/200k ▾     │
-│   ▰▱▱ System tools 14k         │
 │ 5h   ▰▱▱▱▱  12% ↻ 2h14         │
 │ week ▰▰▰▰▱  81% ↻ 4d           │
 ╰────────────────────────────────╯
 ╭─ CONTEXT ROLLOVER ─────────────╮
 │ Status   MONITORING            │
-│ Context  142k / 200k           │
 │ Progress ▰▰▰▰▰▰▰▱▱▱ 71%        │
-│ Next     180k · 38k left       │
-│ Handoff  Not started           │
 ╰────────────────────────────────╯
-╭─ WORKING TREE 3 ───────────────╮
-│ my-app · feat/parser ↑2        │
-│ +79 -12 in 3 files             │
-│ ● M src/parse.ts      +48 -12  │
-│ ● M src/parse.test.ts +31  -0  │
-│   ? notes.md           +0  -0  │
+╭─ NOTES ────────────────────────╮
+│ - ask about the rate limiter   │
+│ - parser: try the slow path    │
+│                                │
 ╰────────────────────────────────╯
-╭─ SESSIONS 9 · all › ───────────╮
-│ ▸ enhance the cockpit    now   │
-│   fix the parser rounding 2h   │
-╰────────────────────────────────╯
+ ▰▰▰▰▰▰▰▱▱▱▱▱▱ 37% · ☕ warm 48m
 ╭─ ACTIONS ──────────────────────╮
 │ new · compact · rewind · resu… │
 ╰────────────────────────────────╯
 ```
 
 Each block is framed in its own colour, its title set into the top edge, so the pane reads as
-separate parts at a glance. `●` marks a file this session wrote to, so your edits stand out from whatever else is dirty in
-the tree. Percentages go green → amber → red as they climb. Every color is a theme key, so the
-pane follows whatever theme you run, custom ones included.
+separate parts at a glance. Percentages go green → amber → red as they climb. Every colour is a
+theme key, so the pane follows whatever theme you run, custom ones included.
 
-## The mascot
+## Notes
 
-In the pane's MASCOTS block, under the sessions, Claude's own mascot acts out what the
-session is doing, with what it is doing written underneath. Each subagent at work gets one
-of its own to its right, in its own colour, labelled with its task (as many as the pane's
-width fits; the rest are counted):
+**NOTES** takes every row the other blocks leave and scrolls past that. What you type is
+saved as you type it, per project, so each repository keeps its own notes across sessions. On
+the mobile app, which draws no text field yet, the notes are shown, not edited.
+
+## The progress line
+
+The line above the actions is the session at a glance:
+
+- **Context fill** as a purple shimmer that sweeps while Claude works. It turns to heat colours
+  once a rollover (or, without the rollover mod, a compact) is near.
+- **The prompt cache**: `☕ warm 48m` counts down from the last response; amber in its last
+  five minutes; `🧊 cold · start fresh` once it has expired. A cold cache means the next turn
+  pays for the whole context again, so that is a good moment to start a new session instead.
+
+Claude Code does not tell mods the cache TTL, so set it in the plugin's options: `1h` (the
+default, a Claude subscription) or `5m` (an API key).
+
+## Subagents
+
+While subagents run, each gets a row **above the prompt**, in the main screen, with a ⟳ in the
+same shimmer and how long it has been running:
 
 ```
-╭─ MASCOTS 2 agents ──────────────╮
-│ ▗▐▛█▜▌▖  ▘▐▛█▜▌▖  ▗▐▛█▜▌▝        │
-│ ▝▜███▛▘  ▗▜███▛▘  ▝▜███▛▖        │
-│                                 │
-│          find cal…  write t…     │
-│ running npm test                │
-╰─────────────────────────────────╯
+⟳ Explore auth flow          1m 04s
+⟳ Write migration tests         38s
 ```
 
-It is built for attention that drifts. **Motion means something is happening**: the arms go while work
-is under way and for a few seconds after a change, then the mascot stands
-still — idle never moves. **Colour says whose turn it is**: green when done (`✓ done — your
-turn`), red when a step failed (`⚠ failed 1 step: npm test`, kept until the next prompt),
-yellow when the session is waiting on you (`⏳ needs you: …`).
+The band is gone the moment none run, and the prompt area is the engine's own again. The
+pane's **AGENTS** block keeps the last few for reference.
 
 A soft chime, with a toast, marks the moments attention has most likely wandered: a
 permission prompt, and the end of a turn that ran longer than 30 seconds. Short turns stay
@@ -86,13 +87,22 @@ The transcript is redrawn, never rewritten — the stored messages are untouched
 
 ## Install
 
+The repository holds two mods, each in its own folder:
+
 ```bash
 git clone https://github.com/aymengraoui/claude-code-cockpit
-claude --plugin-dir ./claude-code-cockpit
+claude --plugin-dir ./claude-code-cockpit/cockpit --plugin-dir ./claude-code-cockpit/rollover
 ```
 
-To keep it loaded in every session, add the folder to `CLAUDE_CODE_PLUGIN_DIRS`, or install it
-as a plugin with `/plugin`.
+To keep both loaded in every session, list the folders in `CLAUDE_CODE_PLUGIN_DIRS` in
+`~/.claude/settings.json` (`;` between them on Windows, `:` elsewhere):
+
+```json
+{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/claude-code-cockpit/cockpit:/path/to/claude-code-cockpit/rollover" } }
+```
+
+Either mod works alone: without the rollover mod the CONTEXT ROLLOVER block says
+`UNAVAILABLE`.
 
 The pane opens itself at session start on a terminal at least 144 columns wide — the width at
 which an unasked pane is allowed to seat itself. Narrower than that, or if you close it, open it
@@ -103,13 +113,10 @@ with `/cockpit`, or bind a key to it:
 { "bindings": [ { "context": "Global", "bindings": { "alt+c": "command:cockpit" } } ] }
 ```
 
-Any action spelled `command:<name>` runs that slash command, so `command:cockpit` opens the
-pane from anywhere.
-
 ## What it reads
 
 Everything comes from the session you are already in. Nothing is sent anywhere, and the only
-process it ever starts is `git`:
+process it ever starts is the terminal `new` opens:
 
 | Shown | Where it comes from |
 | --- | --- |
@@ -120,78 +127,33 @@ process it ever starts is `git`:
 | the plan | `tool.call` on `TodoWrite`, read from the payload Claude writes |
 | permission mode | `permission_mode` on the prompt, tool-result and stop hook inputs |
 | context fill, 5h and weekly windows | `session.measure` |
-| the repository | the session's directory when it is one; otherwise the one the session last wrote a file in |
-| branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
 | what fills the context | `$.session.usage({ breakdown: 'summary' })`, the categories `/context` counts |
-| running agents | `tool.call` on the `Agent` tool, timed around `next(e)` |
-| Claude Code's sessions | the transcripts in every project's transcript directory, found beside the `transcript_path` the classic hook inputs carry |
-| context rollover | `$.state` `context-rollover.status`, published by the [context-rollover](https://github.com/aymengraoui/claude-code-context-rollover) mod |
-
-The session list is Claude Code's own, not the mod's bookkeeping: what `/resume` lists. Claude
-Code writes one `<session-id>.jsonl` per session into a per-project directory, all of them side
-by side under `~/.claude/projects`, and the classic hook inputs carry this session's
-`transcript_path` — so the directory is never guessed. Every project's sessions are listed,
-newest first, each titled as `/resume` titles it: the name given with `/rename`, else the title
-Claude Code wrote for it, else the first prompt its author actually typed. A session opened and
-left alone has nothing to resume and is left out, as `/resume` leaves it out.
-
-The overview shows the five newest, with how long ago each ran and, for another project's, which
-project. `all ›` swaps the overview for the whole list, a page at a time.
-
-What each transcript says is cached in `$.store` with the time it was written, so it is read
-again only once it changes. `$.fs.read` stops at 4 MiB, and the longest sessions are the ones
-most worth resuming, so a larger transcript is read with `git grep` for just its title rows and
-first prompts. The directory itself is cached too, so a reload lists the sessions before any
-prompt has been typed.
+| the prompt cache | the time of the last response, plus the TTL you set |
+| running subagents | `$.agent.list()`, timed from when each is first seen |
+| notes | `$.store`, keyed by project |
+| context rollover | `$.state` `context-rollover.status`, published by the [context-rollover](./rollover) mod |
 
 **Press the model or the effort to change it.** Each opens the engine's own picker, `/model`
-or `/effort`, through `$.command.run`, which runs a slash command as if it were typed. The
-pane keeps no list of its own on purpose: what those pickers offer depends on the account
-and the model (plan-gated models, context-window variants, the effort levels a model
-takes), and none of it is exposed to a plugin, so a copy could never be exact. Should the
-run be refused, the command is left in the prompt box, one Enter away.
-
-The model line names the running model, as `/model` does (`Opus 5.5`), read from
-`$.session.model()` on every tick so a switch shows at once. Effort has no setting to read,
-so it arrives with each request and with the classic hook inputs, which carry
-`effort.level` — a change made with `/effort` shows at the next tool call or turn end.
-
-**Press a changed file to see its diff.** The diff against `HEAD` takes the pane, drawn as a
-diff, with `← back` to return; an untracked file is shown as it stands. Past 1,500 lines it
-is cut, and says how much was left out.
+or `/effort`, through `$.command.run`. The pane keeps no list of its own on purpose: what those
+pickers offer depends on the account and the model, and none of it is exposed to a plugin.
 
 **Press the `▸` beside the context bar to see what fills it** — the categories `/context`
-counts, largest first, deferred tool schemas left out since they cost nothing until loaded —
-with `compact` waiting in the toolbar below.
+counts, largest first — with `compact` waiting in the toolbar below.
 
 **The quick actions sit in a toolbar pinned to the bottom edge** — `new · compact · rewind ·
-resume · clear` — so they never scroll away with the content above:
-the pane is drawn exactly as tall as its body, the content growing into what is left and
-clipped there. Each quick action runs the engine's own command; `compact` shows a `⚠` past
-85% context. `new` opens a fresh `claude` in a terminal of its own, in the same directory. `clear` discards the conversation, so it asks twice: the first
-press arms it and shows `clear?`, a second within four seconds runs it.
-
-**The repository follows the work.** A session started in a home directory still works in a
-repository, so when the session's own directory is not one, the pane follows the repository
-of the last file the session wrote, and remembers it for the next launch.
-
-**Press a session to open it.** The hook API exposes no way to switch sessions in place —
-`--resume` is a launch flag — so a press opens `claude --resume <id>` in a terminal of its
-own, in the directory that session ran in (where `--resume` finds it), trying Windows Terminal then a console on Windows, Terminal.app then the usual
-emulators elsewhere. Nothing about the setup is assumed: when no terminal answers, the
-command goes to the clipboard instead, so a click is never lost.
-
-Two read-only `git` calls per completed turn, not per edit — the pane costs a few milliseconds
-a turn and never writes to your repo.
+resume · clear`. Each runs the engine's own command; `compact` shows a `⚠` past 85% context.
+`new` opens a fresh `claude` in a terminal of its own, in the same directory. `clear` discards
+the conversation, so it asks twice: the first press arms it and shows `clear?`, a second within
+four seconds runs it.
 
 ## The context rollover block
 
-**CONTEXT ROLLOVER** shows the lifecycle of the
-[context-rollover](https://github.com/aymengraoui/claude-code-context-rollover) mod, which moves long-running work into a
-fresh session before the context grows too large. The cockpit only **observes**: that mod is
-the single source of truth and writes `$.state` `context-rollover.status`. The pane reads that
-value while drawing, so the host redraws it on every write, with no polling of its own. Nothing
-in the cockpit can start, stop or change a rollover.
+**CONTEXT ROLLOVER** shows the lifecycle of the [context-rollover](./rollover) mod, which moves
+long-running work into a fresh session before the context grows too large. The cockpit only
+**observes**: that mod is the single source of truth and writes `$.state`
+`context-rollover.status`. The pane reads that value while drawing, so the host redraws it on
+every write, with no polling of its own. Nothing in the cockpit can start, stop or change a
+rollover.
 
 | Row | Shows |
 | --- | --- |
@@ -205,9 +167,9 @@ in the cockpit can start, stop or change a rollover.
 | Next action | what the rollover mod is doing now, or will do next |
 | Error | the last error, when there is one |
 
-Every read is validated against the contract's schema version (`hooks/lib/rollover.ts`; the
-types are an observer's copy in `types/rollover.d.ts`). A missing value (that mod not
-installed or not loaded) draws `UNAVAILABLE` and a reason. So does a malformed value or an
+Every read is validated against the contract's schema version (`cockpit/hooks/lib/rollover.ts`;
+the types are an observer's copy in `cockpit/types/rollover.d.ts`). A missing value (that mod
+not installed or not loaded) draws `UNAVAILABLE` and a reason. So does a malformed value or an
 unknown schema. A writer whose heartbeat is more than 45 s old draws `STALE`, with its figures
 dimmed. The rest of the pane is unaffected either way.
 
@@ -215,7 +177,7 @@ dimmed. The rest of the pane is unaffected either way.
 
 A Claude Code mod is a plugin of function hooks: every event in the engine runs through a chain,
 and a hook can watch it, rewrite what the rest of the chain sees, or answer for it. `cockpit`
-only ever watches, except for the one hook that draws:
+mostly watches; its drawing is done by `ui.render` hooks:
 
 ```ts
 on('ui.render', { component: 'Pane', requestId: 'cockpit' }, async ($, e) => {
@@ -226,61 +188,44 @@ on('ui.render', { component: 'Pane', requestId: 'cockpit' }, async ($, e) => {
 })
 ```
 
-Four files do the work:
+In `cockpit/hooks/`:
 
-- `hooks/register.tsx` — the hooks and the pane's tree
-- `hooks/lib/format.ts` — bars, durations, token counts, path and model formatting
-- `hooks/lib/git.ts` — parsers for the two git commands
-- `hooks/lib/tools.ts` — readers for tool-call payloads
-- `hooks/lib/sessions.ts` — Claude Code's transcripts: titles, the mode, the tail command
-- `hooks/lib/launch.ts` — the terminal commands to try, per platform
-- `hooks/lib/palette.ts` — the colours, by value: swap this file for your own
+- `register.tsx` — the hooks, the pane's tree and the subagent band
+- `lib/format.ts` — bars, the shimmer, durations, token counts, path and model formatting
+- `lib/usage.ts` — usage figures and the cache countdown
+- `lib/tools.ts` — readers for tool-call payloads
+- `lib/attention.ts` — marked questions and failed-call lines
+- `lib/launch.ts` — the terminal commands to try, per platform
+- `lib/rollover.ts` — the rollover mod's state, validated
+- `lib/palette.ts` — the colours, by value: swap this file for your own
 
 Everything outside `register.tsx` is pure functions, which is why most of the suite needs no
 engine at all.
 
-Sections that have nothing to show say so — `not a git repository`, `nothing yet` — rather
-than vanishing, so a quiet pane reads as quiet instead of broken.
-
-The pane ticks every two seconds while it is open: durations and resets are read at draw time,
-so a tick that stamps the state is enough to move every clock, and it re-reads the usage
-figures as it goes. It stops the moment the pane is closed and never runs twice.
-
-The permission mode is the awkward one. In a local terminal session no event reaches a
-plugin when it changes: the engine notices the change but tells only the remote bridge and
-the SDK stream. The mode pill in the footer (`⏵⏵ auto mode on`) is drawn as its own element,
-which is not in the text the `PromptHint` hook receives. That text is only
-`(shift+tab to cycle) · ← for agents`, so the footer cannot be read for it either.
-
-What a plugin does get is the exact value, `permission_mode`, on the classic hook inputs for
-a prompt, a tool result and a turn's end. The pane shows that value in the footer's own
-words (`auto` is `auto mode on`). It is never a guess, but it moves at those moments, not on
-the keypress: a shift+tab made while the session sits idle shows with your next message.
-
-The pane is primed in `session.start`, so it is populated the moment it opens rather than
-filling in as events arrive: the engine already holds the usage figures, the model and the
-turn count, so they are asked for instead of waited on. `session.start` runs again on every
-reload, so an edit to the mod repopulates it too.
-
 State lives in `$.state` rather than module variables, so a hot reload keeps the pane's
-contents, and a write redraws exactly the readers.
+contents, and a write redraws exactly the readers. The pane is primed in `session.start`, so it
+is populated the moment it opens rather than filling in as events arrive.
+
+The permission mode is the awkward one. In a local terminal session no event reaches a plugin
+when it changes, so the pane shows `permission_mode` from the classic hook inputs for a prompt,
+a tool result and a turn's end. It is never a guess, but a shift+tab made while the session sits
+idle shows with your next message.
 
 ## Development
 
+Each mod is validated and tested on its own:
+
 ```bash
-claude plugin validate .   # manifest, hooks and every $ call the module makes
-claude plugin test .       # the suite, against the real engine
+claude plugin validate cockpit && claude plugin test cockpit
+claude plugin validate rollover && claude plugin test rollover
 ```
 
-The suite covers the pure helpers and mounts the pane through the engine on the `terminal`
-surface, asserting what it draws from seeded usage figures and seeded `git` output.
-
-Edits hot-reload: with the folder loaded, each change takes effect when the turn that made it
+Edits hot-reload: with the folders loaded, each change takes effect when the turn that made it
 ends.
 
 ## Compatibility
 
-Built and tested against Claude Code 2.1.289 on the `terminal` surface. The hook API is young —
+Built and tested against Claude Code 2.1.314 on the `terminal` surface. The hook API is young —
 if a release moves under it, `claude plugin validate` will say so before anything draws, and a
 hook that fails is skipped with the engine drawing its own thing instead.
 

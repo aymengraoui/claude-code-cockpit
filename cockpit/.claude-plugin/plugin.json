@@ -1,6 +1,6 @@
 {
   "name": "cockpit",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "A sidebar for Claude Code in the terminal: usage, context rollover, plan, agents, per-project notes, and a progress line that says whether the prompt cache is still warm.",
   "author": {
     "name": "Aymen Graoui",

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { Activity, Cockpit, ContextRow, MascotState } from '../types'
-import { bar, kilo, footerMode, modelLabel, shimmer, spoken, shortText, toPosix, until } from './lib/format'
+import { bar, kilo, footerMode, modelLabel, shimmer, SHIMMER, spoken, shortText, toPosix, until } from './lib/format'
 import { subjectOf, todosOf } from './lib/tools'
 import { isWindowsPath, launchCommands } from './lib/launch'
 import { heatOf, TOKYO } from './lib/palette'
@@ -303,7 +303,10 @@ const syncAgents = async ($: EngineInterface): Promise<void> => {
   const same = was.length === agents.length && was.every((one, index) => one.id === agents[index]?.id)
   if (same) return
 
-  await update($, mascot, prev => ({ ...mascotDefaults(prev), agents }))
+  // The engine's list carries no start time, so an agent's clock starts when it is first seen.
+  const now = await $.clock.now()
+  const timed = agents.map(one => ({ ...one, at: was.find(old => old.id === one.id)?.at ?? now }))
+  await update($, mascot, prev => ({ ...mascotDefaults(prev), agents: timed }))
   startAnimating($)
 }
 
@@ -898,6 +901,33 @@ export const register: Register = (on, options) => {
               ))}
             </Box>,
           ],
+        })}
+      </Box>
+    )
+  })
+
+  // Subagents at work, one row each above the prompt: a ⟳ in the shimmer and how long it
+  // has run. Gone once none run. Reading the mascot subscribes, so the frame moves it.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const m = mascotDefaults(await read($, mascot))
+    if (m.agents.length === 0 || e.props.hasSurvey) return next(e)
+
+    const { Box, Text } = $.ui.resolve(e)
+    const width = Math.max(20, (e.viewport?.columns ?? 80) - 4)
+    const now = Date.now()
+
+    return (
+      <Box flexDirection="column">
+        {m.agents.map((agent, index) => {
+          const time = agent.at === undefined ? '' : ` ${spoken(now - agent.at)}`
+          return (
+            <Box key={agent.id}>
+              {/* Each agent sits at its own point of the shimmer, so they pulse out of step. */}
+              <Text color={SHIMMER[(m.frame + index * 3) % SHIMMER.length] ?? TOKYO.orange}>⟳ </Text>
+              <Text color={TOKYO.text}>{shortText(agent.label, width - time.length)}</Text>
+              <Text color={TOKYO.dim}>{time}</Text>
+            </Box>
+          )
         })}
       </Box>
     )

@@ -81,7 +81,7 @@ export type MascotState = {
   /** When the running turn began, to tell a long turn from a short one. */
   turnStartedAt: number | null
   /** Subagents still at work, as the engine reports them: the shimmer runs while any do. */
-  agents: { id: string; label: string }[]
+  agents: { id: string; label: string; at?: number }[]
 }
 
 declare module 'claude-code' {

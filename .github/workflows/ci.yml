@@ -18,9 +18,15 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
-      # Both commands read the plugin locally and need no account.
-      - name: Validate the manifest, hooks and every $ call
-        run: claude plugin validate .
+      # Both commands read the plugin locally and need no account. Each mod is checked on its own.
+      - name: Validate the cockpit
+        run: claude plugin validate cockpit
 
-      - name: Run the suite against the engine
-        run: claude plugin test .
+      - name: Test the cockpit
+        run: claude plugin test cockpit
+
+      - name: Validate the rollover mod
+        run: claude plugin validate rollover
+
+      - name: Test the rollover mod
+        run: claude plugin test rollover

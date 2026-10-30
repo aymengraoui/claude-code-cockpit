@@ -672,6 +672,41 @@ test('the end of a turn is a line that is easy to find when scrolling back', asy
   expect(await marker.find({ text: '✓ done in 3m 12s' })).toBeDefined()
 })
 
+test('subagents at work get a row each above the prompt, with how long they have run', async ($, on) => {
+  const agents = [{ id: 'a1', label: 'Explore auth flow', at: Date.now() - 64000 }]
+  on('state.get', (_$, e, next) =>
+    e.key === 'mascot' ? ({ value: { value: { agents }, version: 1 } } as never) : next(e),
+  )
+
+  const band = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: true, maxRows: 10 } as never,
+  })
+
+  expect(await band.find({ text: 'Explore auth flow' })).toBeDefined()
+  expect(await band.find({ text: '1m 04s' })).toBeDefined()
+})
+
+test('with no subagents the band above the prompt is left to the engine', async ($, on) => {
+  on('state.get', (_$, e, next) =>
+    e.key === 'mascot' ? ({ value: { value: { agents: [] }, version: 1 } } as never) : next(e),
+  )
+  // The engine's own band, which the hook should hand the drawing back to.
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }) as never)
+
+  const band = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: true, maxRows: 10 } as never,
+  })
+
+  expect(await band.find({ text: 'engine band' })).toBeDefined()
+  expect(await band.find({ text: '⟳' })).toBeUndefined()
+})
+
 test('a call is described by what it is: a file by its name, a command by itself', () => {
   expect(aboutCall('Edit', 'C:/code/proj/src/parse.ts')).toBe('parse.ts')
   expect(aboutCall('Bash', 'git show v99')).toBe('git show v99')

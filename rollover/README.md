@@ -7,16 +7,16 @@ Session A ──soft──▶ preparing ──prepare──▶ ready ──turn 
                                               └──hard, mid-turn──▶ drain ──┘
 ```
 
-It publishes its whole lifecycle as shared state, which the [Cockpit](https://github.com/aymengraoui/claude-code-cockpit) sidebar draws as a **CONTEXT ROLLOVER** block.
+It publishes its whole lifecycle as shared state, which the [Cockpit](../cockpit) sidebar draws as a **CONTEXT ROLLOVER** block.
 
 ## Install
 
-The mod is a plugin folder loaded the same way as the Cockpit: list both folders in `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`. The separator is `;` on Windows and `:` elsewhere.
+The mod lives in the `rollover/` folder of the [claude-code-cockpit](https://github.com/aymengraoui/claude-code-cockpit) repository, beside the Cockpit in `cockpit/`. List both folders in `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`. The separator is `;` on Windows and `:` elsewhere.
 
 ```json
 {
   "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "C:/Users/UltraPc/Desktop/Code/claude-code-cockpit;C:/Users/UltraPc/Desktop/Code/claude-code-context-rollover"
+    "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/claude-code-cockpit/cockpit:/path/to/claude-code-cockpit/rollover"
   }
 }
 ```
