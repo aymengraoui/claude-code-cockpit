@@ -7,7 +7,7 @@ import type { MascotActivity } from '../../types'
 
 export type { MascotActivity }
 
-/** The tool a call names, as the activity the mascot acts out. */
+/** The tool a call names, as the activity it stands for. */
 export const activityOfTool = (tool: string): MascotActivity => {
   if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool)) return 'writing'
   if (tool === 'Bash') return 'running'
@@ -18,7 +18,7 @@ export const activityOfTool = (tool: string): MascotActivity => {
 }
 
 /**
- * What a call is about, as the mascot's line says it: a file by its name, a command by
+ * What a call is about, said short: a file by its name, a command by
  * itself — without a leading `cd <dir> &&`, which only says where it ran. Taking the part
  * after the last slash suits a path and mangles a command, so the two are told apart.
  */

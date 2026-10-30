@@ -4,7 +4,7 @@
  * The engine's own components name theme keys (`subtle`, `claude`) and the surface
  * resolves them, but a plugin tree is surer of what it draws if it names the colour
  * itself — and the separators in particular were asked for in these colours. Swap
- * these six lines for your own palette and the whole pane follows.
+ * these lines for your own palette and the whole pane follows.
  */
 export const TOKYO = {
   text: '#c0caf5',

@@ -29,15 +29,6 @@ export const shimmer = (percent: number, width: number, frame: number): { char: 
     color: char === FILLED ? (SHIMMER[(((index - frame) % SHIMMER.length) + SHIMMER.length) % SHIMMER.length] ?? null) : null,
   }))
 
-/** The palette key a 0-100 figure should be drawn in: calm until it is worth noticing. */
-export const heat = (percent: number): string => {
-  if (percent >= 90) return 'error'
-  if (percent >= 75) return 'warning'
-  if (percent >= 50) return 'claude'
-
-  return 'success'
-}
-
 /** `2h14`, `18m`, `4d` until an ISO timestamp; null when it is past or unparsable. */
 export const until = (iso: string | null, now = Date.now()): string | null => {
   if (iso === null) return null

@@ -5,10 +5,8 @@ export type Activity = {
   tool: string
   /** The call's subject: a path, a command, an agent's description. */
   subject: string
-  /** Wall-clock duration, once the call has returned. */
+  /** Wall-clock duration, once the call has returned; null while it runs. */
   ms: number | null
-  /** null while the call runs. */
-  isError: boolean | null
 }
 
 /** A rate-limit window as the engine reports it. */
@@ -33,8 +31,6 @@ export type Cockpit = {
   project: string | null
   /** That directory in full: what a resumed session should open in. */
   cwd: string | null
-  /** This session's id, so the history can mark which entry is live. */
-  sessionId: string | null
   /** Prompts answered so far. */
   turns: number | null
   context: number | null
@@ -57,7 +53,7 @@ export type Cockpit = {
   notes: string
 }
 
-/** What the mascot acts out. */
+/** What the session is doing, as its hooks last saw it. */
 export type MascotActivity =
   | 'idle'
   | 'thinking'
@@ -72,8 +68,6 @@ export type MascotActivity =
 /** What the session is doing: drives the chime, the toasts and the progress shimmer. */
 export type MascotState = {
   activity: MascotActivity
-  /** The file, the command, or the message the activity is about. */
-  detail: string | null
   /** The shimmer's frame; the pane redraws on each. */
   frame: number
   /** Tools that failed this turn, by what they were doing. */

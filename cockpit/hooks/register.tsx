@@ -26,11 +26,11 @@ const GUTTER = 2
 const BLOCK_INSET = 4
 /** The quick actions, each the engine's own command; the one that discards comes last. */
 const QUICK_ACTIONS = ['new', 'compact', 'rewind', 'resume', 'clear'] as const
-/** How fast the mascot moves: a frame every this many milliseconds. */
+/** How fast the shimmer moves: a frame every this many milliseconds. */
 const FRAME_MS = 280
-/** Frames a finished, failed or waiting mascot keeps moving before it settles: about ten seconds. */
+/** Frames the shimmer keeps moving after work finishes, fails or waits: about ten seconds. */
 const SETTLE_FRAMES = 36
-/** A safety for one long step: past this many frames with nothing changing, the mascot rests. */
+/** A safety for one long step: past this many frames with nothing changing, the shimmer rests. */
 const MAX_FRAMES = 2000
 /** The chime, a file of the plugin's own. */
 const CHIME = 'sounds/chime.wav'
@@ -57,7 +57,6 @@ const EMPTY: Cockpit = {
   mode: null,
   project: null,
   cwd: null,
-  sessionId: null,
   turns: null,
   context: null,
   tokens: null,
@@ -77,17 +76,17 @@ const state = atom({ plugin: 'cockpit', key: 'state' } as const, EMPTY)
 
 const MASCOT_IDLE: MascotState = {
   activity: 'idle',
-  detail: null,
   frame: 0,
   failures: [],
   turnStartedAt: null,
   agents: [],
 }
 
-/** The mascot's own slot, so its frames are written apart from the pane's other state. */
+/** What the session is doing, in its own slot so its frames are written apart from the pane's
+ * other state. Still keyed `mascot`, so state stored by older versions keeps loading. */
 const mascot = atom({ plugin: 'cockpit', key: 'mascot' } as const, MASCOT_IDLE)
 
-/** The mascot's state with every field present, as `withDefaults` is for the pane's. */
+/** That state with every field present, as `withDefaults` is for the pane's. */
 export const mascotDefaults = (stored: Partial<MascotState> | null | undefined): MascotState => ({
   ...MASCOT_IDLE,
   ...(stored ?? {}),
@@ -99,7 +98,7 @@ export const mascotDefaults = (stored: Partial<MascotState> | null | undefined):
  * The state with every field present, whatever version wrote it.
  *
  * `$.state` outlives a reload, so a new version reads what an older one stored — without
- * the fields it added. Drawn as stored, the first of them (`diff`, since removed, read as undefined, not
+ * the fields it added. Drawn as stored, the first of them (a field read as undefined, not
  * null) threw and left the pane blank. Every read goes through this, and the start of a
  * session writes it back once.
  */
@@ -213,9 +212,9 @@ export const effortLabel = (level: string): string =>
 /** This session's transcript, which says which platform this is. */
 let transcriptPath = ''
 
-/** Set what the mascot is doing. */
-const act = async ($: EngineInterface, activity: MascotActivity, detail: string | null): Promise<void> => {
-  await moveMascot($, value => ({ ...value, activity, detail }))
+/** Set what the session is doing. */
+const act = async ($: EngineInterface, activity: MascotActivity): Promise<void> => {
+  await moveMascot($, value => ({ ...value, activity }))
 }
 
 /** The chime: once, softly, and never a failure if the sound cannot play. */
@@ -223,17 +222,16 @@ const chime = ($: EngineInterface): void => {
   void $.audio.play({ asset: CHIME }).catch(() => undefined)
 }
 
-/** The activities that are work in progress: the mascot moves for as long as they last. */
+/** The activities that are work in progress: the shimmer moves for as long as they last. */
 const WORKING: ReadonlySet<MascotActivity> = new Set(['thinking', 'writing', 'running', 'reading', 'planning'])
 
 /** One animation loop at a time. */
 let isAnimating = false
 
 /**
- * The mascot's heartbeat, which redraws its block in the pane. Motion is information here, not
- * decoration: the mascot moves while work is under way, moves for a few seconds when
- * something changes — done, failed, needs you — and then stands still, its colour and
- * its words saying the rest. Idle never moves. So the loop ends by itself, and any change
+ * The heartbeat that moves the progress shimmer and the subagent band. Motion is information
+ * here, not decoration: it moves while work is under way, for a few seconds when something
+ * changes — done, failed, needs you — and then stands still. Idle never moves. So the loop ends by itself, and any change
  * of activity starts it again. Like the pane's tick, nothing in it may reject.
  */
 const startAnimating = ($: EngineInterface): void => {
@@ -282,7 +280,7 @@ const AT_WORK = new Set(['pending', 'running', 'waiting'])
 
 /**
  * The subagents at work, as the engine reports them. An Agent call returns as soon as a
- * background subagent starts, so the call alone would show its mascot for a moment; the
+ * background subagent starts, so the call alone would show it for a moment; the
  * engine's own list says it is still running until it is not.
  */
 const readAgents = async ($: EngineInterface): Promise<{ id: string; label: string }[] | null> => {
@@ -295,7 +293,7 @@ const readAgents = async ($: EngineInterface): Promise<{ id: string; label: stri
   }
 }
 
-/** Bring the mascots in line with the subagents at work, writing only on a change. */
+/** Bring the band in line with the subagents at work, writing only on a change. */
 const syncAgents = async ($: EngineInterface): Promise<void> => {
   const agents = await readAgents($)
   if (agents === null) return
@@ -310,7 +308,7 @@ const syncAgents = async ($: EngineInterface): Promise<void> => {
   startAnimating($)
 }
 
-/** Change the mascot, and let it move to show it. */
+/** Change what the session is doing, and let the shimmer move to show it. */
 const moveMascot = async ($: EngineInterface, change: (value: MascotState) => MascotState): Promise<void> => {
   await update($, mascot, prev => change(mascotDefaults(prev)))
   startAnimating($)
@@ -369,9 +367,8 @@ export const register: Register = (on, options) => {
 
     // At launch no event has fired yet, so every figure the engine already holds is
     // asked for here rather than waited on. This runs again on each reload.
-    const [cwd, id, usage, model, turns] = await Promise.all([
+    const [cwd, usage, model, turns] = await Promise.all([
       $.session.cwd().catch(() => ''),
-      $.session.id().catch(() => ''),
       $.session.usage().catch(() => null),
       $.session.model().catch(() => null),
       $.session.turns().catch(() => null),
@@ -384,7 +381,6 @@ export const register: Register = (on, options) => {
       ...(usage === null ? {} : fromUsage(prev, usage)),
       project: segments.at(-1) ?? null,
       cwd: cwd === '' ? null : toPosix(cwd),
-      sessionId: id === '' ? null : id,
       model: model === null ? prev.model : modelLabel(model),
       turns: turns ?? prev.turns,
       notes: typeof notes === 'string' ? notes : '',
@@ -413,7 +409,6 @@ export const register: Register = (on, options) => {
     await moveMascot($, value => ({
       ...value,
       activity: 'thinking',
-      detail: null,
       failures: [],
       turnStartedAt: startedAt,
     }))
@@ -428,8 +423,7 @@ export const register: Register = (on, options) => {
 
   // A permission prompt or an idle wait: the one moment the session cannot go on without you.
   on('classic.Notification', async ($, e, next) => {
-    const message = typeof e.message === 'string' ? e.message : null
-    await act($, 'waiting', message === null ? null : shortText(message, 60))
+    await act($, 'waiting')
     chime($)
 
     return next(e)
@@ -497,7 +491,7 @@ export const register: Register = (on, options) => {
     // This build carries a tool's arguments on `e` itself; an older one carried them under `input`.
     const input = ((e as { input?: unknown }).input ?? e) as Record<string, unknown>
     const subject = subjectOf(e.tool, input)
-    const entry: Activity = { id: e.tool_use_id, tool: e.tool, subject, ms: null, isError: null }
+    const entry: Activity = { id: e.tool_use_id, tool: e.tool, subject, ms: null }
     const isAgent = e.tool === 'Agent'
 
     // The plan is the tool's own payload, so the pane shows it as Claude writes it.
@@ -509,26 +503,21 @@ export const register: Register = (on, options) => {
       ...(isAgent ? { agents: [...prev.agents, entry].slice(-AGENTS_KEPT) } : {}),
     }))
 
-    // The main loop's calls are the mascot's; a subagent's walk under their own mascots.
+    // Only the main loop's calls set the activity; a subagent's are its own business.
     const isMain = (e as { agentId?: string }).agentId === undefined
     const what = shortText(aboutCall(e.tool, subject), 40)
-    if (isMain && !isAgent) await act($, activityOfTool(e.tool), what === '' ? null : what)
+    if (isMain && !isAgent) await act($, activityOfTool(e.tool))
 
     const startedAt = await $.clock.now()
     const result = await next(e)
-    const done = { ms: (await $.clock.now()) - startedAt, isError: result.isError === true }
+    const ms = (await $.clock.now()) - startedAt
 
     if (isMain && !isAgent) {
-      if (done.isError) {
+      if (result.isError === true) {
         const failed = what === '' ? e.tool : what
-        await moveMascot($, value => ({
-          ...value,
-          activity: 'alert',
-          detail: failed,
-          failures: [...value.failures, failed],
-        }))
+        await moveMascot($, value => ({ ...value, activity: 'alert', failures: [...value.failures, failed] }))
       } else {
-        await act($, 'thinking', null)
+        await act($, 'thinking')
       }
     }
 
@@ -536,7 +525,7 @@ export const register: Register = (on, options) => {
       await syncAgents($)
       await update($, state, prev => ({
         ...prev,
-        agents: prev.agents.map(one => (one.id === entry.id ? { ...one, ...done } : one)),
+        agents: prev.agents.map(one => (one.id === entry.id ? { ...one, ms } : one)),
       }))
     }
 
@@ -554,7 +543,6 @@ export const register: Register = (on, options) => {
       await moveMascot($, value => ({
         ...value,
         activity: failed > 0 ? 'alert' : 'done',
-        detail: failed > 0 ? `${failed} ${failed === 1 ? 'step' : 'steps'}: ${was.failures.join(', ')}` : null,
         turnStartedAt: null,
       }))
 
@@ -907,7 +895,7 @@ export const register: Register = (on, options) => {
   })
 
   // Subagents at work, one row each above the prompt: a ⟳ in the shimmer and how long it
-  // has run. Gone once none run. Reading the mascot subscribes, so the frame moves it.
+  // has run. Gone once none run. Reading that state subscribes, so the frame moves it.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const m = mascotDefaults(await read($, mascot))
     if (m.agents.length === 0 || e.props.hasSurvey) return next(e)

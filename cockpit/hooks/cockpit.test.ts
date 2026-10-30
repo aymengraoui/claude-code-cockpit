@@ -490,7 +490,7 @@ test('a pane reloaded over an older version state still draws', async ($, on) =>
     props: PANE_PROPS,
   })
 
-  // Blank before: the drawing threw on the missing diff field.
+  // Blank before: the drawing threw on a field the older version never stored.
   expect((await ui.find({ key: 'model' }))?.text).toContain('Opus 5.5')
   expect(await ui.find({ text: 'auto mode on' })).toBeDefined()
 })
