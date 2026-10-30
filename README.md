@@ -67,7 +67,7 @@ same shimmer and how long it has been running:
 ```
 
 The band is gone the moment none run, and the prompt area is the engine's own again. The
-pane's **AGENTS** block keeps the last few for reference.
+pane's **AGENTS** block, just above the progress line, keeps the last few for reference.
 
 A soft chime, with a toast, marks the moments attention has most likely wandered: a
 permission prompt, and the end of a turn that ran longer than 30 seconds. Short turns stay

@@ -820,22 +820,6 @@ export const register: Register = (on, options) => {
               )),
             })}
 
-          {it.agents.length > 0 &&
-            Section({
-              id: 'agents',
-              title: 'AGENTS',
-              count: it.agents.filter(one => one.ms === null).length,
-              color: BLOCK.agents,
-              rows: it.agents.slice(-3).map(agent => (
-                <Box>
-                  <Text color={agent.ms === null ? TOKYO.orange : TOKYO.dim}>
-                    {agent.ms === null ? '⟳ ' : '· '}
-                  </Text>
-                  <Text color={TOKYO.text}>{shortText(agent.subject, Math.max(4, columns - 3))}</Text>
-                </Box>
-              )),
-            })}
-
           {Section({
             id: 'notes',
             title: 'NOTES',
@@ -856,6 +840,23 @@ export const register: Register = (on, options) => {
                 />
               ),
           })}
+
+          {/* Last before the progress line, so the work under way sits beside the context it uses. */}
+          {it.agents.length > 0 &&
+            Section({
+              id: 'agents',
+              title: 'AGENTS',
+              count: it.agents.filter(one => one.ms === null).length,
+              color: BLOCK.agents,
+              rows: it.agents.slice(-3).map(agent => (
+                <Box>
+                  <Text color={agent.ms === null ? TOKYO.orange : TOKYO.dim}>
+                    {agent.ms === null ? '⟳ ' : '· '}
+                  </Text>
+                  <Text color={TOKYO.text}>{shortText(agent.subject, Math.max(4, columns - 3))}</Text>
+                </Box>
+              )),
+            })}
         </Box>
 
         <Box key="progress" height={1}>
