@@ -121,6 +121,26 @@ test('a TodoWrite payload is taken only in the shape this build documents', () =
   expect(todosOf({ todos: [{ content: 'no status' }] })).toBe(null)
 })
 
+test('the model reports its plan through the progress tool, and the bar counts it', async ($, on) => {
+  const registered: string[] = []
+  on('tool.register', (_$, e) => {
+    registered.push(e.name)
+
+    return { value: { tool: `mcp__cockpit__${e.name}` } }
+  })
+  const ui = await startPane($, on)
+  expect(registered).toContain('progress')
+  expect(await ui.find({ text: ' no plan' })).toBeDefined()
+
+  const todos = [
+    { content: 'read the page', status: 'completed' },
+    { content: 'add the toggle', status: 'in_progress' },
+  ]
+  await $.tool.call({ tool: 'mcp__cockpit__progress', tool_use_id: 'p1', input: { todos } } as never)
+
+  expect(await ui.find({ text: ' 50%' })).toBeDefined()
+})
+
 test('the subject column says what a call is about, per tool', () => {
   expect(subjectOf('Bash', { command: 'npm test' })).toBe('npm test')
   expect(subjectOf('Edit', { file_path: 'src/a.ts' })).toBe('src/a.ts')

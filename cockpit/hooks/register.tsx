@@ -16,8 +16,6 @@ const PANE = 'cockpit'
 
 /** `$.store` key prefix for each project's notes, the project's directory after it. */
 const NOTES = 'cockpit.notes.'
-/** Open plan items the pane lists; the rest wait their turn. */
-const PLAN_SHOWN = 5
 /** How long a press that wants confirming stays armed. */
 const ARM_MS = 4000
 /** Columns of space between the pane's edge — the line that resizes it — and the content. */
@@ -34,6 +32,8 @@ const SETTLE_FRAMES = 36
 const MAX_FRAMES = 2000
 /** The chime, a file of the plugin's own. */
 const CHIME = 'sounds/chime.wav'
+/** The tool the model reports its plan through, as the engine names it. */
+const PROGRESS_TOOL = 'mcp__cockpit__progress'
 /** Context fill at which compacting is offered as the thing to do next. */
 const COMPACT_AT = 85
 /** Colours the context breakdown's rows take in turn. */
@@ -43,7 +43,6 @@ const BLOCK = {
   session: TOKYO.accent,
   usage: TOKYO.blue,
   rollover: TOKYO.cyan,
-  plan: TOKYO.yellow,
   agents: TOKYO.orange,
   notes: TOKYO.green,
   progress: TOKYO.accent,
@@ -362,6 +361,30 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'cockpit', description: 'Open the cockpit pane' })
+    // The pane's progress bar counts this list, so the model is asked to keep it current.
+    await $.tool.register({
+      name: 'progress',
+      description:
+        'Show the person how far along you are, on the progress bar in their cockpit pane. When a task takes more than one step, call this first with the whole plan, then again each time a step starts or finishes, sending the full list every time.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                content: { type: 'string', description: 'The step, in a few words.' },
+                status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+              },
+              required: ['content', 'status'],
+            },
+          },
+        },
+        required: ['todos'],
+      },
+      isDeferred: false,
+    }).catch(() => undefined)
     await update($, state, prev => withDefaults(prev))
 
     // At launch no event has fired yet, so every figure the engine already holds is
@@ -517,6 +540,16 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  on('tool.call', { tool: PROGRESS_TOOL }, async ($, e) => {
+    const input = ((e as { input?: unknown }).input ?? e) as Record<string, unknown>
+    const todos = todosOf(input)
+    if (todos === null) return { result: 'Not shown: send todos as [{ content, status }].' as never }
+    await update($, state, prev => ({ ...prev, todos }))
+    const done = todos.filter(one => one.status === 'completed').length
+
+    return { result: `Progress shown: ${done}/${todos.length}.` as never }
+  })
+
   on('turn.complete', async ($, e, next) => {
     // A subagent's turn ending says nothing about the main one.
     if ((e as { agentId?: string }).agentId === undefined) {
@@ -557,8 +590,7 @@ export const register: Register = (on, options) => {
     const columns = outer - BLOCK_INSET
     const rows = Math.max(8, e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 24)
 
-    const open = it.todos.filter(one => one.status !== 'completed')
-    const doneCount = it.todos.length - open.length
+    const doneCount = it.todos.filter(one => one.status === 'completed').length
 
     // The context-rollover mod's shared state. Reading it here subscribes the pane, so
     // each write that mod makes redraws it; the cockpit itself only observes.
@@ -709,24 +741,20 @@ export const register: Register = (on, options) => {
     )
 
     // The notes take every row the other blocks leave: each block is its rows and two of frame.
-    const planRows = it.todos.length > 0 ? Math.min(open.length, PLAN_SHOWN) + 2 : 0
     const agentRows = m.agents.length > 0 ? Math.min(m.agents.length, 3) + 2 : 0
-    const fixed = 4 + (usageRows.length + 2) + rolloverRows + planRows + agentRows + 3 + 3
+    const fixed = 4 + (usageRows.length + 2) + rolloverRows + agentRows + 3 + 3
     const noteRows = Math.max(3, rows - fixed - 2)
 
-    // The progress line: context fill as a purple shimmer, turning to heat once a rollover nears.
+    // The progress line: how much of the agent's plan is done, as a purple shimmer.
     const cache = cacheView(it.respondedAt, now, cacheTtlMs)
     const cacheText =
       cache === null ? '' : cache.isWarm ? `☕ warm ${cache.left}` : '🧊 cold · start fresh'
     const cacheColour =
       cache === null ? TOKYO.dim : !cache.isWarm ? TOKYO.blue : cache.leftMs < 5 * 60_000 ? TOKYO.yellow : TOKYO.green
-    const percent = it.context ?? 0
-    const isNear =
-      rollover.kind !== 'unavailable' && it.tokens !== null
-        ? it.tokens >= rollover.status.thresholds.soft
-        : percent >= COMPACT_AT
-    // The figures take ` 37% · ` beside the cache text; a spare column covers a wide emoji.
-    const cells = shimmer(percent, Math.max(6, columns - cacheText.length - 9), m.frame)
+    const percent = it.todos.length === 0 ? 0 : (doneCount / it.todos.length) * 100
+    const progressText = it.todos.length === 0 ? 'no plan' : `${Math.round(percent)}%`
+    // The figures take ` 60% · ` beside the cache text; a spare column covers a wide emoji.
+    const cells = shimmer(percent, Math.max(6, columns - cacheText.length - progressText.length - 5), m.frame)
 
     return (
       <Box flexDirection="column" height={rows} paddingLeft={GUTTER}>
@@ -788,24 +816,6 @@ export const register: Register = (on, options) => {
                   )),
           })}
 
-          {it.todos.length > 0 &&
-            Section({
-              id: 'plan',
-              title: 'PLAN',
-              count: `${doneCount}/${it.todos.length}`,
-              color: BLOCK.plan,
-              rows: open.slice(0, PLAN_SHOWN).map(todo => (
-                <Box>
-                  <Text color={todo.status === 'in_progress' ? TOKYO.orange : TOKYO.dim}>
-                    {todo.status === 'in_progress' ? '▸ ' : '· '}
-                  </Text>
-                  <Text color={todo.status === 'in_progress' ? TOKYO.text : TOKYO.dim}>
-                    {shortText(todo.content, Math.max(6, columns - 3))}
-                  </Text>
-                </Box>
-              )),
-            })}
-
           {Section({
             id: 'notes',
             title: 'NOTES',
@@ -840,7 +850,12 @@ export const register: Register = (on, options) => {
                 return (
                   <Box key={agent.id}>
                     <Text color={SHIMMER[(m.frame + index * 3) % SHIMMER.length] ?? TOKYO.orange}>⟳ </Text>
-                    <Text color={TOKYO.text}>{shortText(agent.label, Math.max(4, columns - 3 - time.length))}</Text>
+                    <Button
+                      key={`agent-${agent.id}`}
+                      plain
+                      label={shortText(agent.label, Math.max(4, columns - 3 - time.length))}
+                      onPress={() => void $.ui.view({ agentId: agent.id })}
+                    />
                     <Text color={TOKYO.dim}>{time}</Text>
                   </Box>
                 )
@@ -850,16 +865,16 @@ export const register: Register = (on, options) => {
 
         {Section({
           id: 'progress',
-          title: 'CONTEXT',
+          title: 'PROGRESS',
           color: BLOCK.progress,
           rows: [
             <Box key="progress" height={1}>
               {cells.map((cell, index) => (
-                <Text key={`cell-${index}`} color={cell.color === null ? TOKYO.line : isNear ? heatOf(percent) : cell.color}>
+                <Text key={`cell-${index}`} color={cell.color ?? TOKYO.line}>
                   {cell.char}
                 </Text>
               ))}
-              <Text color={isNear ? heatOf(percent) : TOKYO.accent}> {`${Math.round(percent)}%`}</Text>
+              <Text color={SHIMMER[m.frame % SHIMMER.length] ?? TOKYO.accent}> {progressText}</Text>
               {cacheText !== '' && <Text color={TOKYO.dim}> · </Text>}
               {cacheText !== '' && <Text color={cacheColour}>{cacheText}</Text>}
             </Box>,
