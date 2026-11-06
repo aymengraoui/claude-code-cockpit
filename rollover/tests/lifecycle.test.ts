@@ -579,3 +579,29 @@ test('a resumed session that reads files in its first turn is not mistaken for o
   await turn(r, w, [17000, 48000, 67000])
   expect(phaseOf(w)).toBe('completed')
 })
+
+test('a cancel while agents drain stops the rollover: nothing saved, no /clear, the gate stays lifted', async () => {
+  const w = new World()
+  w.messages = conversation()
+  w.agents = fiveAgents()
+  const r = w.rollover({ agentDrainTimeoutMs: 20000 })
+  await r.start()
+  let cancelling: Promise<string> | null = null
+  w.onSleep = () => {
+    cancelling ??= r.cancel()
+  }
+  await r.rollover('test')
+
+  expect(await cancelling).toContain('Cancelled')
+  expect(w.clears).toBe(0)
+  expect(w.snapshotNames()).toEqual([])
+  expect(phaseOf(w)).toBe('monitoring')
+  expect(await r.gate('Bash', true)).toBe(null)
+  expect(r.isRolling).toBe(false)
+
+  // The next rollover is not cancelled by the last one's cancel.
+  w.onSleep = () => undefined
+  w.agents = []
+  await r.rollover('test')
+  expect(w.clears).toBe(1)
+})

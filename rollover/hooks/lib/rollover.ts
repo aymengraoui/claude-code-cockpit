@@ -97,10 +97,15 @@ const within = async <T>(port: Port, ms: number, work: Promise<T>): Promise<T> =
   }
 }
 
+/** Thrown out of a rollover that `/rollover cancel` stopped: not a failure, so never retried. */
+class Cancelled extends Error {}
+
 export class Rollover {
   private config: Config
   private configWarnings: string[]
   private inFlight: Promise<void> | null = null
+  /** Set by `cancel()`; the running rollover checks it between steps and stops. */
+  private isCancelled = false
   private turnId: string | null = null
   private isTurnRunning = false
   private notified = new Set<string>()
@@ -453,6 +458,7 @@ export class Rollover {
   /** Start (or join) the one rollover of this session. Idempotent: a second trigger joins the first. */
   rollover(trigger: string): Promise<void> {
     if (this.inFlight !== null) return this.inFlight
+    this.isCancelled = false
     this.inFlight = this.runWithRetries(trigger).finally(() => {
       this.inFlight = null
     })
@@ -462,6 +468,11 @@ export class Rollover {
 
   get isRolling(): boolean {
     return this.inFlight !== null
+  }
+
+  /** Stop here when the person cancelled, before the next step patches the phase back. */
+  private checkCancelled(): void {
+    if (this.isCancelled) throw new Cancelled('rollover cancelled')
   }
 
   private async runWithRetries(trigger: string): Promise<void> {
@@ -480,6 +491,10 @@ export class Rollover {
         await within(this.port, this.config.rolloverTimeoutMs, this.attempt(rolloverId, fromSessionId, previousRolloverId, before.generation, before.context.tokens))
         return
       } catch (err) {
+        if (err instanceof Cancelled || this.isCancelled) {
+          this.log('info', `rollover ${rolloverId} cancelled`, true)
+          return
+        }
         const message = errorText(err)
         const at = await this.port.now()
         this.log('error', `rollover ${rolloverId} attempt ${attempt + 1} failed: ${message}`, true)
@@ -487,6 +502,10 @@ export class Rollover {
           const wait = this.config.retryDelayMs * 2 ** attempt
           await this.patch({ error: { message, at, isRetriable: true }, operation: `Retrying in ${Math.round(wait / 1000)}s (attempt ${attempt + 2}/${this.config.maxRetries + 1})` })
           await this.port.sleep(wait)
+          if (this.isCancelled) {
+            this.log('info', `rollover ${rolloverId} cancelled`, true)
+            return
+          }
           continue
         }
         await this.fail(rolloverId, fromSessionId, message, before.context.tokens)
@@ -522,13 +541,16 @@ export class Rollover {
     const currentId = await this.port.sessionId().catch(() => fromSessionId)
     if (persisted === null) {
       if (currentId !== fromSessionId) throw new Error('the session changed before the continuation was saved; nothing to restore from')
+      this.checkCancelled()
       await this.patch({ phase: 'draining', operation: 'Waiting for agents to finish' })
       await this.journal(fromSessionId, 'draining', rolloverId, generation, null)
       await this.drainAgents()
 
+      this.checkCancelled()
       await this.patch({ phase: 'persisting', operation: 'Persisting continuation state' })
       await this.journal(fromSessionId, 'persisting', rolloverId, generation, null)
       const snapshot = await this.collect(rolloverId, fromSessionId, previousRolloverId, generation, finalTokens, cwd, root, 'final')
+      this.checkCancelled()
       const path = await writeSnapshot(this.port.fs, root, snapshot.snapshot)
       persisted = { snapshot: snapshot.snapshot, path }
       await this.patch({ continuation: { status: 'persisted', path, rolloverId, bytes: snapshot.snapshot.markdown.length, approxTokens: snapshot.approxTokens, updatedAt: await this.port.now() } })
@@ -536,6 +558,7 @@ export class Rollover {
       this.log('info', `continuation saved: ${path} (~${snapshot.approxTokens} tokens)`, true)
     }
 
+    this.checkCancelled()
     if (!this.config.automaticRestart) {
       await this.patch({ phase: 'awaiting-restart', operation: 'Continuation saved — run /clear to continue in a fresh session' })
       await this.journal(fromSessionId, 'awaiting-restart', rolloverId, generation, null)
@@ -547,6 +570,7 @@ export class Rollover {
     // 2. The fresh session. Skipped when the session already changed (a retry after /clear).
     let toSessionId = await this.port.sessionId().catch(() => fromSessionId)
     if (toSessionId === fromSessionId) {
+      this.checkCancelled()
       await this.patch({ phase: 'restarting', operation: 'Starting a fresh session' })
       await this.journal(fromSessionId, 'restarting', rolloverId, generation, null)
       if (this.config.restartMode === 'new-terminal' && (await this.handOffToTerminal(rolloverId, cwd))) return
@@ -678,6 +702,7 @@ export class Rollover {
   async cancel(): Promise<string> {
     const s = await this.status()
     if (s.phase === 'restarting' || s.phase === 'resuming') return 'Too late to cancel: the fresh session is already starting.'
+    if (this.inFlight !== null) this.isCancelled = true
     await this.patch({ phase: 'monitoring', operation: 'Monitoring context usage (rollover cancelled)', error: null })
 
     return this.inFlight === null ? 'Nothing to cancel; monitoring.' : 'Cancelled; a persisted continuation stays on disk. /rollover now starts again.'
@@ -707,11 +732,13 @@ export class Rollover {
     }
     const deadline = (await this.port.now()) + this.config.agentDrainTimeoutMs
     while (working > 0 && (await this.port.now()) < deadline) {
+      this.checkCancelled()
       await this.patch({ operation: `Waiting for ${working} agent${working === 1 ? '' : 's'} to finish`, agents: countAgents(agents) })
       await this.port.sleep(AGENT_POLL_MS)
       agents = (await this.port.agents().catch(() => null)) ?? agents
       working = stillWorking(agents)
     }
+    this.checkCancelled()
     if (working > 0) this.log('warn', `${working} agent(s) still running at the drain deadline; recorded for re-dispatch`, true)
   }
 
