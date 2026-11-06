@@ -27,19 +27,19 @@
       "type": "number",
       "title": "Soft limit (tokens)",
       "description": "Context tokens at which the rollover starts preparing: the model is told and state is gathered.",
-      "default": 180000
+      "default": 380000
     },
     "prepareLimit": {
       "type": "number",
       "title": "Prepare limit (tokens)",
       "description": "Context tokens at which a draft continuation is saved, new agents are held, and the session rolls over at the next turn end.",
-      "default": 190000
+      "default": 390000
     },
     "hardLimit": {
       "type": "number",
       "title": "Hard limit (tokens)",
       "description": "Context tokens at which new main-loop work is refused and the turn is wound down so the rollover happens now. Clamped to 90% of the model's window when that is smaller.",
-      "default": 200000
+      "default": 400000
     },
     "automaticRestart": {
       "type": "boolean",

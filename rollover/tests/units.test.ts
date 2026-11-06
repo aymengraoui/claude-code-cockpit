@@ -61,7 +61,7 @@ const data = (overrides: Partial<ContinuationData> = {}): ContinuationData => ({
 
 test('the defaults are the documented thresholds', () => {
   const { config, warnings } = mergeConfig()
-  expect([config.softLimit, config.prepareLimit, config.hardLimit]).toEqual([180000, 190000, 200000])
+  expect([config.softLimit, config.prepareLimit, config.hardLimit]).toEqual([380000, 390000, 400000])
   expect(config.autoCommit).toBe(false)
   expect(warnings).toEqual([])
 })
@@ -76,14 +76,14 @@ test('a bad value is skipped with a warning naming it; thresholds out of order f
   expect(bad.config.softLimit).toBe(DEFAULTS.softLimit)
   expect(bad.config.restartMode).toBe('clear')
   expect(bad.warnings.length).toBe(3)
-  const disorder = mergeConfig({ softLimit: 300000 })
-  expect(disorder.config.softLimit).toBe(180000)
+  const disorder = mergeConfig({ softLimit: 450000 })
+  expect(disorder.config.softLimit).toBe(380000)
   expect(disorder.warnings[0]).toContain('soft < prepare < hard')
 })
 
 test('an empty /config field means unset, and a comma list becomes a list', () => {
   const { config } = mergeConfig({ softLimit: '', protectedBranches: 'main, release' })
-  expect(config.softLimit).toBe(180000)
+  expect(config.softLimit).toBe(380000)
   expect(config.protectedBranches).toEqual(['main', 'release'])
 })
 

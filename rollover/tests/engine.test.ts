@@ -57,7 +57,7 @@ test('at start the mod publishes a valid status with the engine’s own reading'
   expect(s.sessionId).toBe('sessA000-0000')
   expect(s.phase).toBe('monitoring')
   expect(s.context).toMatchObject({ tokens: 20000, window: 1000000, source: 'session.usage' })
-  expect(s.thresholds).toEqual({ soft: 180000, prepare: 190000, hard: 200000 })
+  expect(s.thresholds).toEqual({ soft: 380000, prepare: 390000, hard: 400000 })
 })
 
 test('a measurement past the soft limit moves the shared state to preparing and tells the model', async ($, on) => {
@@ -70,11 +70,11 @@ test('a measurement past the soft limit moves the shared state to preparing and 
   on('session.start', () => ({ cwd: 'C:/work/game' }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: 'C:/work/game', surface: 'terminal', isInteractive: true })
-  await $.session.measure({ context: { window: 1000000, tokens: 183000, percent: 18 }, rateLimits: [], changed: ['context'] })
+  await $.session.measure({ context: { window: 1000000, tokens: 383000, percent: 38 }, rateLimits: [], changed: ['context'] })
   const s = statusOf()
   expect(s.phase).toBe('preparing')
-  expect(s.context).toMatchObject({ tokens: 183000, source: 'session.measure' })
-  expect(notes.some(one => one.includes('[context-rollover] Context is at 183k'))).toBe(true)
+  expect(s.context).toMatchObject({ tokens: 383000, source: 'session.measure' })
+  expect(notes.some(one => one.includes('[context-rollover] Context is at 383k'))).toBe(true)
 })
 
 test('the project’s own config file sets the thresholds', async ($, on) => {
@@ -96,7 +96,7 @@ test('from the prepare limit the tool chain refuses a new Agent, and lets other 
   on('tool.list', () => ({ value: [] }))
   await $.session.start({ cwd: 'C:/work/game', surface: 'terminal', isInteractive: true })
   await $.turn.start({ text: 'go', turnId: 'turn-1' })
-  await $.session.measure({ context: { window: 1000000, tokens: 192000, percent: 19 }, rateLimits: [], changed: ['context'] })
+  await $.session.measure({ context: { window: 1000000, tokens: 392000, percent: 39 }, rateLimits: [], changed: ['context'] })
   expect(statusOf().phase).toBe('ready')
 
   const agent = await $.tool.call({ tool: 'Agent', description: 'x', prompt: 'y' } as never)
@@ -165,7 +165,7 @@ test('/rollover status describes the state in words', async ($, on) => {
   on('session.start', () => ({ cwd: 'C:/work/game' }))
   await $.session.start({ cwd: 'C:/work/game', surface: 'terminal', isInteractive: true })
   const out = await $.command.run({ command: 'rollover', args: 'status' } as never)
-  expect(out.text ?? '').toContain('context 142k / 200k')
+  expect(out.text ?? '').toContain('context 142k / 400k')
   expect(out.text ?? '').toContain('phase monitoring')
 })
 
@@ -182,7 +182,7 @@ test('a response’s own usage, mid-turn, past the hard limit drains the turn: m
       answer: '',
       toolUses: [],
       stopReason: 'tool_use',
-      usage: { input_tokens: 2000, output_tokens: 300, cache_read_input_tokens: 199000, cache_creation_input_tokens: 1500, model: 'claude-opus-5-5' },
+      usage: { input_tokens: 2000, output_tokens: 300, cache_read_input_tokens: 399000, cache_creation_input_tokens: 1500, model: 'claude-opus-5-5' },
     } as never
   })
   await $.session.start({ cwd: 'C:/work/game', surface: 'terminal', isInteractive: true })
@@ -191,7 +191,7 @@ test('a response’s own usage, mid-turn, past the hard limit drains the turn: m
   for await (const _ of stream) {
     // drain the stream
   }
-  expect(statusOf().context).toMatchObject({ tokens: 202500, source: 'turn.step' })
+  expect(statusOf().context).toMatchObject({ tokens: 402500, source: 'turn.step' })
   expect(statusOf().phase).toBe('draining')
   const bash = await $.tool.call({ tool: 'Bash', command: 'ls' } as never)
   expect(String((bash as { text?: string }).text ?? (bash as { deny?: string }).deny)).toContain('Context rollover in progress')

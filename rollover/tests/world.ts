@@ -225,9 +225,9 @@ export class World {
     }
   }
 
-  /** A lifecycle on this world, with configuration over the defaults. */
+  /** A lifecycle on this world: its own 180k/190k/200k limits, and configuration over the defaults. */
   rollover(overrides: Partial<Record<keyof Config, unknown>> = {}): Rollover {
-    const { config, warnings } = mergeConfig({ retryDelayMs: 1000, agentDrainTimeoutMs: 30000, ...overrides })
+    const { config, warnings } = mergeConfig({ softLimit: 180000, prepareLimit: 190000, hardLimit: 200000, retryDelayMs: 1000, agentDrainTimeoutMs: 30000, ...overrides })
 
     return new Rollover(this.port(), config, warnings)
   }

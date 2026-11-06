@@ -56,9 +56,9 @@ export type Config = {
 
 export const DEFAULTS: Config = {
   enabled: true,
-  softLimit: 180000,
-  prepareLimit: 190000,
-  hardLimit: 200000,
+  softLimit: 380000,
+  prepareLimit: 390000,
+  hardLimit: 400000,
   automaticRestart: true,
   restartMode: 'clear',
   continuationDir: '',

@@ -26,7 +26,7 @@ import type { MessageSeen } from './lib/transcript'
 const PROJECT_CONFIG = '.claude/context-rollover.json'
 const ROLLOVER_TOOL = 'mcp__context-rollover__rollover_now'
 
-const status = atom({ plugin: 'context-rollover', key: 'status' } as const, initialStatus({ soft: 180000, prepare: 190000, hard: 200000 }, 0))
+const status = atom({ plugin: 'context-rollover', key: 'status' } as const, initialStatus({ soft: 380000, prepare: 390000, hard: 400000 }, 0))
 
 /** The lifecycle of this load; a reload makes a new one over the state the host kept. */
 let rollover: Rollover | null = null
