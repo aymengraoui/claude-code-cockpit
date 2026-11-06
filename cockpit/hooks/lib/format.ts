@@ -42,6 +42,17 @@ export const until = (iso: string | null, now = Date.now()): string | null => {
   return `${minutes}m`
 }
 
+/**
+ * A path cut to `width` from the left, so the filename always survives:
+ * `src/engine/parse.ts` at 14 becomes `…ngine/parse.ts`.
+ */
+export const shortPath = (path: string, width: number): string => {
+  const clean = toPosix(path)
+  if (clean.length <= width || width < 2) return clean
+
+  return `…${clean.slice(clean.length - (width - 1))}`
+}
+
 /** A command cut to `width` from the right, where the verb is. */
 export const shortText = (text: string, width: number): string => {
   const clean = text.replace(/\s+/g, ' ').trim()
@@ -86,6 +97,14 @@ export const spoken = (ms: number): string => {
   if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
 
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
+}
+
+/** A prompt reduced to one short line, to title a session in the history list. */
+export const titleOf = (text: string, max = 64): string => {
+  const line = text.replace(/\s+/g, ' ').trim()
+  if (line === '') return 'untitled'
+
+  return line.length <= max ? line : `${line.slice(0, max - 1)}…`
 }
 
 const MODEL_LABELS: Readonly<Record<string, string>> = {

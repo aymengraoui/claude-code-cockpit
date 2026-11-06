@@ -5,8 +5,8 @@ A sidebar for [Claude Code](https://claude.com/claude-code) in the terminal, and
 
 The desktop app shows you where a session stands. The terminal makes you guess: how full the
 context is, what the session has cost, whether the prompt cache is still warm, whether that
-subagent is still going. `cockpit` puts all of it in a pane beside the conversation, with room
-for your own notes.
+subagent is still going. `cockpit` puts all of it in a pane beside the conversation, with the
+working tree and your past sessions a press away.
 
 ```
 ╭─ SESSION 7 turns ──────────────╮
@@ -22,10 +22,16 @@ for your own notes.
 │ Status   MONITORING            │
 │ Progress ▰▰▰▰▰▰▰▱▱▱ 71%        │
 ╰────────────────────────────────╯
-╭─ NOTES ────────────────────────╮
-│ - ask about the rate limiter   │
-│ - parser: try the slow path    │
-│                                │
+╭─ WORKING TREE 3 ───────────────╮
+│ my-app · feat/parser ↑2        │
+│ +79 -12 in 3 files             │
+│ ● M src/parse.ts      +48 -12  │
+│ ● M src/parse.test.ts +31  -0  │
+│   ? notes.md           +0  -0  │
+╰────────────────────────────────╯
+╭─ SESSIONS 9 · all › ───────────╮
+│ ▸ enhance the cockpit    now   │
+│   fix the parser rounding 2h   │
 ╰────────────────────────────────╯
 ╭─ CONTEXT ──────────────────────╮
 │ ▰▰▰▰▰▰▱▱▱▱▱ 37% · ☕ warm 48m   │
@@ -36,14 +42,30 @@ for your own notes.
 ```
 
 Each block is framed in its own colour, its title set into the top edge, so the pane reads as
-separate parts at a glance. Percentages go green → amber → red as they climb. Every colour is a
+separate parts at a glance. `●` marks a file this session wrote to, so your edits stand out
+from whatever else is dirty in the tree. Percentages go green → amber → red as they climb. Every colour is a
 theme key, so the pane follows whatever theme you run, custom ones included.
 
-## Notes
+## Working tree and sessions
 
-**NOTES** takes every row the other blocks leave and scrolls past that. What you type is
-saved as you type it, per project, so each repository keeps its own notes across sessions. On
-the mobile app, which draws no text field yet, the notes are shown, not edited.
+**WORKING TREE** shows the branch, how far it is ahead or behind, and every changed file with
+its line counts. Press a file to open its diff in the pane; `← back` returns. Two read-only
+`git` calls per completed turn, not per edit, so the pane never writes to your repo.
+
+**The repository follows the work.** A session started in a home directory still works in a
+repository, so when the session's own directory is not one, the pane follows the repository
+of the last file the session wrote, and remembers it for the next launch.
+
+**SESSIONS** is Claude Code's own list, what `/resume` lists, from every project's transcripts
+under `~/.claude/projects`. Each is titled as `/resume` titles it: the `/rename` name, else
+Claude Code's title, else the first prompt typed. The five newest show; `all ›` pages through
+the rest. A large transcript is read with `git grep` for just its title rows, and what each
+said is cached in `$.store` until it changes.
+
+**Press a session to open it.** The hook API cannot switch sessions in place, so a press opens
+`claude --resume <id>` in a terminal of its own, in the directory that session ran in (Windows
+Terminal then a console on Windows, Terminal.app then the usual emulators elsewhere). When no
+terminal answers, the command goes to the clipboard instead.
 
 ## The progress line
 
@@ -132,7 +154,9 @@ process it ever starts is the terminal `new` opens:
 | what fills the context | `$.session.usage({ breakdown: 'summary' })`, the categories `/context` counts |
 | the prompt cache | the time of the last response, plus the TTL you set |
 | running subagents (band and AGENTS) | `$.agent.list()`, timed from when each is first seen |
-| notes | `$.store`, keyed by project |
+| the repository | the session's directory when it is one; otherwise the one the session last wrote a file in |
+| branch, divergence, working tree, line counts | `git status --porcelain=v2 --branch` and `git diff HEAD --numstat`, once per turn |
+| Claude Code's sessions | the transcripts in every project's transcript directory, found beside the `transcript_path` the classic hook inputs carry |
 | context rollover | `$.state` `context-rollover.status`, published by the [context-rollover](./rollover) mod |
 
 **Press the model or the effort to change it.** Each opens the engine's own picker, `/model`

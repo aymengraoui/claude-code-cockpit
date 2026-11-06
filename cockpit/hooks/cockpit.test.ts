@@ -1,13 +1,37 @@
 import { expect, test } from 'claude-code/testing'
 
+import {
+  ago,
+  dirOf,
+  grepArgv,
+  idOf,
+  metaFromTranscript,
+  pickRecent,
+  resumeCommand,
+  titleFromTranscript,
+  toPast,
+} from './lib/sessions'
 import { isWindowsPath, launchCommands } from './lib/launch'
 import { effortLabel, withDefaults } from './register'
 import { heatOf, TOKYO } from './lib/palette'
 import { aboutCall, activityOfTool } from './lib/mascot'
 import { emphasizeQuestions, errorLines } from './lib/attention'
 import { subjectOf, todosOf } from './lib/tools'
-import { bar, kilo, footerMode, modelLabel, shimmer, SHIMMER, spoken, shortText, until } from './lib/format'
+import { bar, kilo, footerMode, modelLabel, shimmer, SHIMMER, spoken, shortPath, shortText, titleOf, until } from './lib/format'
+import { capDiff, parseNumstat, parseStatus, relativeTo, withCounts } from './lib/git'
 import { cacheView } from './lib/usage'
+
+const STATUS = [
+  '# branch.oid 0bd1c4f',
+  '# branch.head feat/parser',
+  '# branch.ab +2 -1',
+  '1 .M N... 100644 100644 100644 0bd1 0bd1 src/parse.ts',
+  '1 M. N... 100644 100644 100644 0bd1 0bd1 src/tokens.ts',
+  '? notes.md',
+  '',
+].join('\n')
+
+const NUMSTAT = ['48\t12\tsrc/parse.ts', '90\t0\tsrc/tokens.ts', '-\t-\tlogo.png', ''].join('\n')
 
 const MODEL_ROW = [
   {
@@ -492,10 +516,11 @@ test('state stored by an older version is filled in, never drawn half-shaped', (
   expect(it.contextRows).toBe(null)
   expect(it.armed).toBe(null)
   expect(it.respondedAt).toBe(null)
-  expect(it.notes).toBe('')
+  // A repo stored before `root` existed reads as one with no root.
+  expect(it.repo?.root).toBe('')
   // What the old version did have is kept.
   expect(it.model).toBe('Opus 5.5')
-  expect(withDefaults(null).notes).toBe('')
+  expect(withDefaults(null).history).toEqual([])
 })
 
 test('a pane reloaded over an older version state still draws', async ($, on) => {
@@ -564,10 +589,10 @@ test('every block is framed, its title set into the top edge, each in its own co
   const tops = drawn.match(/"╭─ "/g) ?? []
   const bottoms = drawn.match(/"╰─*╯"/g) ?? []
   expect(tops.length).toBe(bottoms.length)
-  for (const title of ['SESSION', 'USAGE', 'CONTEXT ROLLOVER', 'NOTES', 'ACTIONS']) {
+  for (const title of ['SESSION', 'USAGE', 'CONTEXT ROLLOVER', 'WORKING TREE', 'SESSIONS', 'ACTIONS']) {
     expect(await ui.find({ text: title })).toBeDefined()
   }
-  for (const gone of ['WORKING TREE', 'SESSIONS', 'MASCOTS']) expect(await ui.find({ text: gone })).toBeUndefined()
+  for (const gone of ['NOTES', 'MASCOTS']) expect(await ui.find({ text: gone })).toBeUndefined()
   expect(drawn).toContain('#7aa2f7')
   expect(drawn).toContain('#9ece6a')
 })
@@ -843,18 +868,401 @@ test('the cache reads warm with the time left, then cold past its TTL', () => {
   expect(cacheView(0, hour + 1, hour)?.isWarm).toBe(false)
 })
 
-test('notes take the room the other blocks leave, and every edit is kept per project', async ($, on) => {
-  const stored: Record<string, unknown> = {}
-  on('store.set', (_$, e) => {
-    stored[e.key] = e.value
+test('a long path keeps its filename, a long command keeps its verb', () => {
+  expect(shortPath('src/engine/parse.ts', 40)).toBe('src/engine/parse.ts')
+  expect(shortPath('src/engine/parse.ts', 14)).toBe('…gine/parse.ts')
+  expect(shortPath(`src${String.fromCharCode(92)}a.ts`, 40)).toBe('src/a.ts')
+  expect(shortText('npm run build --silent', 12)).toBe('npm run bui…')
+})
+
+test('git status gives the branch, its divergence and every changed path', () => {
+  const repo = parseStatus(STATUS)
+
+  expect(repo.branch).toBe('feat/parser')
+  expect(repo.ahead).toBe(2)
+  expect(repo.behind).toBe(1)
+  expect(repo.changes.map(one => one.path)).toEqual([
+    'src/parse.ts',
+    'src/tokens.ts',
+    'notes.md',
+  ])
+  expect(repo.changes[2]?.status).toBe('?')
+})
+
+test('a detached head and unparsable output both degrade instead of throwing', () => {
+  expect(parseStatus('# branch.head (detached)').branch).toBe(null)
+  expect(parseStatus('').branch).toBe(null)
+  expect(parseStatus('garbage').changes).toEqual([])
+})
+
+test('numstat counts attach to paths, a binary file counting as zero', () => {
+  const counts = parseNumstat(NUMSTAT)
+
+  expect(counts.get('src/parse.ts')).toEqual({ added: 48, removed: 12 })
+  expect(counts.get('logo.png')).toEqual({ added: 0, removed: 0 })
+})
+
+test("this session's files sort above the rest, then the largest diffs", () => {
+  const repo = withCounts(
+    parseStatus(STATUS),
+    parseNumstat(NUMSTAT),
+    new Set(['src/parse.ts']),
+  )
+
+  expect(repo.changes.map(one => one.path)).toEqual([
+    'src/parse.ts',
+    'src/tokens.ts',
+    'notes.md',
+  ])
+  expect(repo.changes[0]?.isMine).toBe(true)
+  expect(repo.changes[1]?.isMine).toBe(false)
+  expect(repo.changes[1]?.added).toBe(90)
+})
+
+test('the pane draws the branch and the working tree it read from git', async ($, on) => {
+  on('command.register', () => ({ value: undefined }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('config.list', () => ({ value: MODEL_ROW }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { id: 'cockpit' } }))
+  on('store.get', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.id', () => ({ value: 'current' }))
+  on('session.turns', () => ({ value: 3 }))
+  on('session.model', () => ({ value: 'claude-opus-5' }))
+  on('session.usage', () => ({ value: USAGE }))
+  on('process.run', (_$, e) => ({
+    value: {
+      exitCode: 0,
+      stdout: e.argv.includes('rev-parse') ? '/repo' : e.argv.includes('status') ? STATUS : NUMSTAT,
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('clock.now', () => ({ value: Date.now() }))
+  on('session.start', () => ({ sessionId: 'test', cwd: '/repo' }))
+
+  await $.session.start({ source: 'startup', cwd: '/repo' })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  expect(await ui.find({ text: 'feat/parser' })).toBeDefined()
+  expect(await ui.find({ text: 'WORKING TREE' })).toBeDefined()
+  expect(await ui.find({ text: '+48' })).toBeDefined()
+})
+
+test('a prompt becomes a one-line title', () => {
+  expect(titleOf('  fix   the\nparser  ')).toBe('fix the parser')
+  expect(titleOf('', 10)).toBe('untitled')
+  expect(titleOf('a'.repeat(80), 10)).toBe(`${'a'.repeat(9)}…`)
+})
+
+const TRANSCRIPT = [
+  JSON.stringify({ type: 'mode', sessionId: 'older' }),
+  JSON.stringify({ type: 'permission-mode', permissionMode: 'default', sessionId: 'older' }),
+  JSON.stringify({ type: 'user', isMeta: true, message: { content: 'ignore me' } }),
+  JSON.stringify({ type: 'user', message: { content: '<command-name>/cockpit</command-name>' } }),
+  JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'fix the parser' }] } }),
+  JSON.stringify({ type: 'assistant', message: { content: 'on it' } }),
+  '',
+].join(String.fromCharCode(10))
+
+test('a transcript is titled by the first prompt the person actually typed', () => {
+  expect(titleFromTranscript(TRANSCRIPT)).toBe('fix the parser')
+  expect(titleFromTranscript('{"type":"user","message":{"content":"hi"}}')).toBe('hi')
+  expect(titleFromTranscript('not json at all')).toBe(null)
+  expect(titleFromTranscript('')).toBe(null)
+})
+
+test('the transcript directory and session id come off the path the engine gives', () => {
+  const sep = String.fromCharCode(92)
+  expect(dirOf(`C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}abc.jsonl`)).toBe(
+    'C:/Users/me/.claude/projects/p',
+  )
+  expect(dirOf('/home/me/.claude/projects/p/abc.jsonl')).toBe('/home/me/.claude/projects/p')
+  expect(idOf('abc-123.jsonl')).toBe('abc-123')
+})
+
+test('only transcripts are listed, newest first, empty ones left out', () => {
+  const entries = [
+    { name: 'old.jsonl', kind: 'file' as const, size: 10, mtimeMs: 1000 },
+    { name: 'new.jsonl', kind: 'file' as const, size: 10, mtimeMs: 3000 },
+    { name: 'empty.jsonl', kind: 'file' as const, size: 0, mtimeMs: 4000 },
+    { name: 'notes.md', kind: 'file' as const, size: 10, mtimeMs: 5000 },
+    { name: 'sub', kind: 'dir' as const, size: 0, mtimeMs: 6000 },
+  ]
+
+  expect(pickRecent(entries, 8).map(one => one.name)).toEqual(['new.jsonl', 'old.jsonl'])
+  expect(pickRecent(entries, 1).map(one => one.name)).toEqual(['new.jsonl'])
+})
+
+test('a transcript with no prompt is listed by its id instead', () => {
+  const found = { name: 'abcdef1234.jsonl', kind: 'file' as const, size: 10, mtimeMs: 2000, dir: '/p/-home-me-app' }
+
+  expect(toPast(found, { title: null, prompt: 'fix the parser', cwd: '/home/me/app' })).toEqual({
+    id: 'abcdef1234',
+    at: 2000,
+    title: 'fix the parser',
+    cwd: '/home/me/app',
+    project: 'app',
+  })
+  expect(toPast(found, null).title).toBe('abcdef12')
+  expect(toPast(found, null).project).toBe('-home-me-app')
+})
+
+test('a session is titled as /resume titles it: its name, then its AI title, then its first prompt', () => {
+  const sep = String.fromCharCode(92)
+  const rows = (...extra: object[]) =>
+    [
+      JSON.stringify({ type: 'user', cwd: `C:${sep}Users${sep}me${sep}app`, message: { content: 'fix the parser' } }),
+      ...extra.map(one => JSON.stringify(one)),
+    ].join(String.fromCharCode(10))
+
+  expect(metaFromTranscript(rows())).toEqual({ title: null, prompt: 'fix the parser', cwd: 'C:/Users/me/app' })
+  expect(metaFromTranscript(rows({ type: 'ai-title', aiTitle: 'Parser rounding' })).title).toBe('Parser rounding')
+  expect(
+    metaFromTranscript(
+      rows(
+        { type: 'custom-title', customTitle: 'old name' },
+        { type: 'ai-title', aiTitle: 'Parser rounding' },
+        { type: 'custom-title', customTitle: 'parser work' },
+      ),
+    ).title,
+  ).toBe('parser work')
+  expect(metaFromTranscript(TRANSCRIPT).prompt).toBe('fix the parser')
+})
+
+test('a transcript too large to read is grepped from its own folder', () => {
+  const runs = grepArgv('big.jsonl')
+
+  expect(runs.length).toBe(2)
+  for (const argv of runs) {
+    expect(argv.slice(0, 3)).toEqual(['git', 'grep', '--no-index'])
+    expect(argv.at(-1)).toBe('big.jsonl')
+  }
+})
+
+test('how long ago reads short', () => {
+  const now = 100 * 86400000
+
+  expect(ago(now - 10000, now)).toBe('now')
+  expect(ago(now - 12 * 60000, now)).toBe('12m')
+  expect(ago(now - 3 * 3600000, now)).toBe('3h')
+  expect(ago(now - 4 * 86400000, now)).toBe('4d')
+  expect(ago(now - 21 * 86400000, now)).toBe('3w')
+})
+
+test("the pane lists Claude Code's sessions from every project, and all of them a press away", async ($, on) => {
+  const sep = String.fromCharCode(92)
+  const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
+  const now = Date.now()
+  const others = Array.from({ length: 7 }, (_, index) => ({
+    name: `other-${index}.jsonl`,
+    kind: 'file',
+    size: 200,
+    mtimeMs: now - (index + 2) * 3600000,
+  }))
+
+  on('store.get', () => ({ value: {} }))
+  on('store.set', () => ({ value: undefined }))
+  const posix = (at: string) => at.split(sep).join('/')
+
+  on('fs.list', (_$, e) => ({
+    value: posix(e.path).endsWith('/projects')
+      ? [
+          { name: 'p', kind: 'dir', size: 0, mtimeMs: 0 },
+          { name: 'q', kind: 'dir', size: 0, mtimeMs: 0 },
+        ]
+      : posix(e.path).endsWith('/p')
+        ? [
+            { name: 'current.jsonl', kind: 'file', size: 200, mtimeMs: now },
+            { name: 'empty.jsonl', kind: 'file', size: 200, mtimeMs: now - 60000 },
+          ]
+        : others,
+  }))
+  on('fs.read', (_$, e) => ({
+    value: e.path.endsWith('empty.jsonl')
+      ? JSON.stringify({ type: 'mode' })
+      : posix(e.path).includes('/q/')
+        ? JSON.stringify({ type: 'user', cwd: '/home/me/elsewhere', message: { content: 'tune the cache' } })
+        : TRANSCRIPT,
+  }))
+  on('classic.SessionStart', () => ({}))
+
+  await $.classic.SessionStart({ source: 'startup', transcript_path: path })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    // Wide enough that a block's border and padding leave every title whole.
+    props: { ...PANE_PROPS, bodyColumns: 40 },
+  })
+
+  expect(await ui.find({ text: 'SESSIONS' })).toBeDefined()
+  expect(await ui.find({ text: 'fix the parser' })).toBeDefined()
+  expect(await ui.find({ text: 'tune the cache' })).toBeDefined()
+  expect(await ui.find({ text: 'elsewhere' })).toBeDefined()
+  // A session with nothing typed in it has nothing to resume.
+  expect(await ui.find({ text: 'empty' })).toBeUndefined()
+
+  await ui.press({ key: 'sessions-all' })
+  expect(await ui.find({ text: 'ALL SESSIONS' })).toBeDefined()
+  await ui.press({ key: 'sessions-close' })
+  expect(await ui.find({ text: 'ALL SESSIONS' })).toBeUndefined()
+})
+
+test('a session names the command that returns to it', () => {
+  expect(resumeCommand('abc-123')).toBe('claude --resume abc-123')
+})
+
+test('a press with no terminal to be had still leaves the command on the clipboard', async ($, on) => {
+  const sep = String.fromCharCode(92)
+  const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
+  let copied: string | undefined
+  let toasted: string | undefined
+
+  on('store.get', () => ({ value: {} }))
+  on('store.set', () => ({ value: undefined }))
+  on('fs.list', () => ({
+    value: [{ name: 'older.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() - 7200000 }],
+  }))
+  on('fs.read', () => ({ value: TRANSCRIPT }))
+  on('classic.SessionStart', () => ({}))
+  on('ui.copy', (_$, e) => {
+    copied = e.text
+
+    return { value: { isCopied: true } }
+  })
+  on('ui.toast', (_$, e) => {
+    toasted = e.text
 
     return { value: undefined }
   })
-  const ui = await startPane($, on)
 
-  expect(await ui.find({ key: 'notes' })).toBeDefined()
-  expect(JSON.stringify(await ui.drawn())).toMatch(/"rows":([3-9]|\d\d)/)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: path })
 
-  await ui.input({ key: 'notes', text: 'ship the cache line', kind: 'change' })
-  expect(stored['cockpit.notes./repo']).toBe('ship the cache line')
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  await ui.press({ key: 'past-older' })
+
+  expect(copied).toBe('claude --resume older')
+  expect(toasted).toContain('claude --resume older')
+})
+
+test('pressing a session opens it in a new terminal', async ($, on) => {
+  const sep = String.fromCharCode(92)
+  const path = `C:${sep}Users${sep}me${sep}.claude${sep}projects${sep}p${sep}current.jsonl`
+  let launched: readonly string[] | undefined
+  let copied = false
+
+  on('store.get', () => ({ value: {} }))
+  on('store.set', () => ({ value: undefined }))
+  on('fs.list', () => ({
+    value: [{ name: 'older.jsonl', kind: 'file', size: 200, mtimeMs: Date.now() - 7200000 }],
+  }))
+  on('fs.read', () => ({ value: TRANSCRIPT }))
+  on('classic.SessionStart', () => ({}))
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.copy', () => {
+    copied = true
+
+    return { value: { isCopied: true } }
+  })
+  on('process.run', (_$, e) => {
+    launched = e.argv
+
+    return {
+      value: {
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
+    }
+  })
+
+  await $.classic.SessionStart({ source: 'startup', transcript_path: path })
+
+  const ui = await $.ui.mount({
+    plugin: 'cockpit',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'cockpit',
+    props: PANE_PROPS,
+  })
+
+  await ui.press({ key: 'past-older' })
+
+  expect(launched?.[0]).toBe('wt.exe')
+  expect(launched).toContain('claude --resume older')
+  expect(copied).toBe(false)
+})
+
+test('a written path is matched to git by its place in the repository', () => {
+  const inside = relativeTo('C:/code/proj', [
+    'C:/code/proj/src/parse.ts',
+    'c:/code/proj/README.md',
+    'C:/code/other/x.ts',
+    'C:/code/project-two/y.ts',
+  ])
+
+  expect([...inside].sort()).toEqual(['README.md', 'src/parse.ts'])
+})
+
+test('a long diff is cut, and says how much was left out', () => {
+  const lines = Array.from({ length: 10 }, (_, i) => `+line ${i}`).join(String.fromCharCode(10))
+  const cut = capDiff(lines, 4).split(String.fromCharCode(10))
+
+  expect(cut.length).toBe(5)
+  expect(cut[4]).toBe('… 6 more lines')
+  expect(capDiff('short', 4)).toBe('short')
+})
+
+/** A session launched outside any repository, whose work happens in C:/code/proj. */
+
+
+test('pressing a changed file opens its diff, and back returns', async ($, on) => {
+  const { ui } = await startOutsideRepo($, on)
+  await $.tool.call({
+    tool: 'Write',
+    tool_use_id: 'w1',
+    input: { file_path: 'C:/code/proj/src/parse.ts', content: 'x' },
+  })
+
+  await ui.press({ key: 'diff-src/parse.ts' })
+  expect((await ui.find({ type: 'Code' }))?.text).toContain('+new')
+  expect(await ui.find({ key: 'diff-close' })).toBeDefined()
+
+  await ui.press({ key: 'diff-close' })
+  expect(await ui.find({ type: 'Code' })).toBeUndefined()
+  expect(await ui.find({ text: 'WORKING TREE' })).toBeDefined()
+})
+
+test('the diff view keeps its way back at the bottom too', async ($, on) => {
+  const { ui } = await startOutsideRepo($, on)
+  await $.tool.call({
+    tool: 'Write',
+    tool_use_id: 'w1',
+    input: { file_path: 'C:/code/proj/src/parse.ts', content: 'x' },
+  })
+  await ui.press({ key: 'diff-src/parse.ts' })
+
+  const children = childrenOf(await ui.drawn())
+  expect(JSON.stringify(children.at(-1))).toContain('"key":"diff-close"')
 })
